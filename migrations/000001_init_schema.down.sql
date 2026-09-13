@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS attendance_records;
+DROP TABLE IF EXISTS qr_tokens;
+DROP INDEX IF EXISTS one_live_session_per_subject;
+DROP TABLE IF EXISTS class_sessions;
+DROP TYPE IF EXISTS session_status;
+DROP TABLE IF EXISTS class_schedules;
+DROP TABLE IF EXISTS enrollments;
+DROP TABLE IF EXISTS subjects;
+DROP TABLE IF EXISTS refresh_tokens;
+DROP TABLE IF EXISTS users;
+DROP TYPE IF EXISTS user_role;
