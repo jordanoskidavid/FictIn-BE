@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Minimum total statement coverage of the full suite (unit + integration).
+  COVERAGE_MIN: "75"
+  GOLANGCI_LINT_VERSION: v2.14.0
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify modules
+        run: |
+          go mod download
+          go mod verify
+          go mod tidy -diff
+
+      - name: go vet
+        run: |
+          go vet ./...
+          go vet -tags=integration ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          # Build with the go.mod Go version; prebuilt binaries may be older.
+          install-mode: goinstall
+
+      - name: Unit tests (race)
+        run: go test -race ./...
+
+      # Docker is available on ubuntu runners, so testcontainers starts
+      # postgres:18-alpine. This runs unit + integration tests together.
+      - name: Integration tests (race + coverage)
+        run: |
+          COVERPKG=$(go list ./... | grep -v -e /internal/testutil -e /tests/ | paste -sd, -)
+          go test -race -tags=integration -count=1 -covermode=atomic \
+            -coverpkg="$COVERPKG" -coverprofile=coverage.out ./...
+
+      - name: Coverage threshold
+        run: |
+          go tool cover -func=coverage.out | tail -n 1
+          sh scripts/check-coverage.sh coverage.out "$COVERAGE_MIN"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: ignore
+
+      - name: Build
+        run: go build ./...

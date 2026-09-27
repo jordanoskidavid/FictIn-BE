@@ -35,7 +35,9 @@ func New(d Deps) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimw.RequestID)
-	r.Use(chimw.RealIP)
+	// Known issue (reported): RealIP trusts client-supplied X-Forwarded-For /
+	// X-Real-IP headers. Replace it with proxy-aware handling before production.
+	r.Use(chimw.RealIP) //nolint:staticcheck // SA1019, tracked as a security follow-up
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.SecurityHeaders)
 	r.Use(middleware.CORS(d.CORSOrigins))

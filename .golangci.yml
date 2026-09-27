@@ -1,0 +1,41 @@
+# golangci-lint v2. Deliberately small: the default "standard" set plus a few
+# linters that catch real bugs without style noise.
+# Run: golangci-lint run ./...   (CONTRIBUTING.md has install instructions)
+version: "2"
+
+run:
+  # Lint integration tests too.
+  build-tags:
+    - integration
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose     # unclosed HTTP response bodies
+    - errorlint     # errors compared with == instead of errors.Is/As
+    - misspell
+    - nilerr        # returning nil after checking err != nil
+    - unconvert     # unnecessary conversions
+    - usestdlibvars # http.MethodGet instead of "GET", etc.
+  settings:
+    errcheck:
+      exclude-functions:
+        - (*github.com/coder/websocket.Conn).CloseNow
+  exclusions:
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      # Route tables in tests read better with literal methods.
+      - path: _test\.go
+        linters: [usestdlibvars]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - fictin

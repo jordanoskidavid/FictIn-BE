@@ -88,7 +88,7 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 			assert.Equal(t, u.Email, claims.Email)
 			assert.Equal(t, role, claims.Role)
 			assert.Equal(t, u.ID.String(), claims.Subject)
-			assert.Equal(t, t0, claims.IssuedAt.Time.UTC())
+			assert.Equal(t, t0, claims.IssuedAt.UTC())
 		})
 	}
 }

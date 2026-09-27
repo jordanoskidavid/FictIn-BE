@@ -1,0 +1,24 @@
+# Local development database. Start with: docker compose up -d db
+# Credentials match DATABASE_URL in .env.example. If port 5432 is taken by a
+# local Postgres install, run with DB_PORT=5433 and adjust DATABASE_URL.
+# (Integration tests do NOT use this; they start their own throwaway container.)
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: attendance_app
+      POSTGRES_PASSWORD: attendance_local_pw
+      POSTGRES_DB: attendance_db
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql/<major>/.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U attendance_app -d attendance_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

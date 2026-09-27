@@ -156,7 +156,7 @@ Check with:  docker info
 Alternatively, point TEST_POSTGRES_URL at a dedicated *test* Postgres server
 (see CONTRIBUTING.md, "Running integration tests without Docker").
 
-Underlying error: %v
+Underlying error: %w
 ================================================================================`, cause)
 }
 

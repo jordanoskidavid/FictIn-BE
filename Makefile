@@ -3,9 +3,9 @@
 # -race needs cgo (a C compiler). Disable with: make test RACE=
 RACE ?= -race
 # Minimum total coverage enforced by cover-check (and CI).
-COVERAGE_MIN ?= 0
-# Packages whose coverage is measured (test helpers excluded).
-COVERPKG = $(shell go list ./internal/... | grep -v /testutil | paste -sd, -)
+COVERAGE_MIN ?= 75
+# Packages whose coverage is measured: everything except test helpers.
+COVERPKG = $(shell go list ./... | grep -v -e /internal/testutil -e /tests/ | paste -sd, -)
 
 run:
 	go run ./cmd/api

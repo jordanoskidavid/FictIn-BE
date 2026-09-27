@@ -15,7 +15,7 @@ Go + PostgreSQL backend for tracking class attendance via a rotating QR code.
 |---|---|
 | Language | Go 1.27 |
 | Router | `go-chi/chi/v5` |
-| DB | PostgreSQL 15+ (`jackc/pgx/v5` + `pgxpool`, hand-written SQL) |
+| DB | PostgreSQL 18 (`jackc/pgx/v5` + `pgxpool`, hand-written SQL) |
 | Migrations | `golang-migrate/migrate/v4`, SQL files embedded, applied on startup |
 | Auth | JWT access tokens (`golang-jwt/jwt/v5`) + opaque DB-backed refresh tokens, bcrypt |
 | WebSocket | `coder/websocket` |
@@ -26,7 +26,9 @@ Go + PostgreSQL backend for tracking class attendance via a rotating QR code.
 ## Layout
 
 ```
-cmd/api/            entrypoint, wiring, graceful shutdown, background cleanup
+cmd/api/            entrypoint, graceful shutdown, background cleanup
+internal/app/       wiring: config + pool -> services -> router (shared with tests)
+internal/clock/     injectable clock (real + fake) for time-dependent logic
 internal/config/    env loading + validation
 internal/database/  pgx pool, embedded migration runner
 internal/models/    domain structs
@@ -38,6 +40,8 @@ internal/service/   business logic (auth, subject, session, qr rotation, attenda
 internal/handlers/  HTTP handlers (decode -> service -> JSON envelope)
 internal/router/    route table + middleware wiring
 migrations/         000001_init_schema.{up,down}.sql (+ embed.go)
+internal/testutil/  test helpers: DB per test, httptest server, role clients, factories
+tests/integration/  HTTP + Postgres integration tests (build tag: integration)
 ```
 
 ## Configuration
@@ -70,24 +74,24 @@ psql -U postgres -h localhost -c "CREATE DATABASE attendance_db OWNER attendance
 # 2. configure
 copy .env.example .env      # then edit DATABASE_URL + JWT secrets
 
+# (or, instead of step 1, run the database in Docker: docker compose up -d db)
+
 # 3. run (migrations apply automatically on boot)
 go run ./cmd/api
 ```
 
-## Tests
+## Running tests
 
-```powershell
-# unit tests only
-go test ./...
-
-# include integration tests (needs an empty throwaway database)
-psql -U postgres -h localhost -c "CREATE DATABASE attendance_test_db OWNER attendance_app;"
-$env:TEST_DATABASE_URL = "postgres://attendance_app:attendance_local_pw@localhost:5432/attendance_test_db?sslmode=disable"
-go test ./...
+```sh
+go test ./...                              # unit tests: no database or Docker needed
+go test -tags=integration ./...            # full suite: needs Docker (starts postgres:18-alpine)
 ```
 
-Integration tests migrate then `TRUNCATE ... CASCADE` between runs; point
-`TEST_DATABASE_URL` only at a database you don't mind wiping.
+Add `-race` when a C compiler is available (always on in CI). `make test`,
+`make test-integration`, `make test-all`, `make cover` and `make lint` wrap the
+same commands. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup on
+Linux/macOS/Windows, running integration tests without Docker, coverage,
+conventions, and how to add a test for a new endpoint.
 
 ## API
 

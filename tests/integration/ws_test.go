@@ -4,7 +4,6 @@ package integration
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -110,10 +109,8 @@ func TestWS_RejectsUnauthorizedConnections(t *testing.T) {
 			conn, res, err := srv.DialWS(t, "/ws/sessions/"+tt.sessionID+"/qr", tt.token)
 			require.Error(t, err)
 			require.Nil(t, conn)
-			require.NotNil(t, res)
 			assert.Equal(t, tt.wantStatus, res.StatusCode)
-
-			body, _ := io.ReadAll(res.Body)
+			body := res.Body
 			var env struct {
 				Error struct {
 					Code string `json:"code"`
