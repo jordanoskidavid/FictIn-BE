@@ -111,10 +111,8 @@ func (s *AttendanceService) Scan(ctx context.Context, studentID, sessionID uuid.
 	}
 
 	audit("marked")
-	return &ScanResult{Status: "marked", Record: rec, ScannedAt: rec.ScannedAt.Format(timeLayout)}, nil
+	return &ScanResult{Status: "marked", Record: rec, ScannedAt: repository.FormatTimestamp(rec.ScannedAt)}, nil
 }
-
-const timeLayout = "2006-01-02T15:04:05Z07:00"
 
 func (s *AttendanceService) ListForSession(ctx context.Context, sessionID, professorID uuid.UUID) ([]repository.AttendanceRow, error) {
 	sess, err := s.store.Sessions.GetByID(ctx, sessionID)

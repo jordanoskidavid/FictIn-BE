@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -21,7 +22,7 @@ type AttendanceRow struct {
 	StudentID   uuid.UUID `json:"student_id"`
 	StudentName string    `json:"student_name"`
 	StudentCode *string   `json:"student_code,omitempty"`
-	ScannedAt   string    `json:"scanned_at"`
+	ScannedAt   string    `json:"scanned_at"` // RFC3339 UTC, see FormatTimestamp
 }
 
 func (r *AttendanceRepo) Exists(ctx context.Context, sessionID, studentID uuid.UUID) (bool, error) {
@@ -45,6 +46,7 @@ func (r *AttendanceRepo) Insert(ctx context.Context, sessionID, studentID uuid.U
 		}
 		return nil, err
 	}
+	a.ScannedAt = a.ScannedAt.UTC()
 	return &a, nil
 }
 
@@ -59,7 +61,7 @@ type ListFilter struct {
 
 func (r *AttendanceRepo) List(ctx context.Context, f ListFilter) ([]AttendanceRow, error) {
 	q := `SELECT ar.id, ar.session_id, s.id, s.name, s.code,
-			u.id, u.full_name, u.student_code, ar.scanned_at::text
+			u.id, u.full_name, u.student_code, ar.scanned_at
 		FROM attendance_records ar
 		JOIN class_sessions cs ON cs.id = ar.session_id
 		JOIN subjects s ON s.id = cs.subject_id
@@ -96,13 +98,21 @@ func (r *AttendanceRepo) List(ctx context.Context, f ListFilter) ([]AttendanceRo
 	var out []AttendanceRow
 	for rows.Next() {
 		var a AttendanceRow
+		var scannedAt time.Time
 		if err := rows.Scan(&a.ID, &a.SessionID, &a.SubjectID, &a.SubjectName, &a.SubjectCode,
-			&a.StudentID, &a.StudentName, &a.StudentCode, &a.ScannedAt); err != nil {
+			&a.StudentID, &a.StudentName, &a.StudentCode, &scannedAt); err != nil {
 			return nil, err
 		}
+		a.ScannedAt = FormatTimestamp(scannedAt)
 		out = append(out, a)
 	}
 	return out, rows.Err()
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }
+
+// FormatTimestamp renders t the way the API promises timestamps in strings:
+// RFC3339 in UTC with second precision, e.g. "2026-09-13T10:15:30Z".
+func FormatTimestamp(t time.Time) string {
+	return t.UTC().Format(time.RFC3339)
+}
