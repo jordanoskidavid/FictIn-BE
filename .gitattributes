@@ -1,0 +1,6 @@
+# Keep LF line endings in the working tree on every OS. gofmt and
+# golangci-lint expect LF, and shell scripts break with CRLF.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
