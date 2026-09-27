@@ -1,50 +1,35 @@
-package service_test
+//go:build integration
+
+package integration
 
 import (
 	"context"
-	"log/slog"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"fictin/internal/auth"
 	"fictin/internal/clock"
-	"fictin/internal/database"
 	"fictin/internal/models"
 	"fictin/internal/repository"
 	"fictin/internal/service"
+	"fictin/internal/testutil"
 )
 
-// setup connects to TEST_DATABASE_URL, migrates, and truncates all data.
-// The whole package's integration tests are skipped when the var is unset.
-func setup(t *testing.T) (*repository.Store, *pgxpool.Pool) {
+// newServiceStore returns a store over a fresh, migrated database for this test.
+func newServiceStore(t *testing.T) *repository.Store {
 	t.Helper()
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set; skipping integration tests")
-	}
-	require.NoError(t, database.RunMigrations(dsn))
-
-	pool, err := database.Connect(context.Background(), dsn)
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-
-	_, err = pool.Exec(context.Background(), `
-		TRUNCATE attendance_records, qr_tokens, class_sessions, class_schedules,
-		enrollments, subjects, refresh_tokens, users RESTART IDENTITY CASCADE`)
-	require.NoError(t, err)
-
-	return repository.NewStore(pool), pool
+	t.Parallel()
+	pool, _ := testutil.NewDB(t)
+	return repository.NewStore(pool)
 }
 
-func TestAttendanceHappyPath(t *testing.T) {
-	store, _ := setup(t)
+func TestServiceAttendanceHappyPath(t *testing.T) {
+	store := newServiceStore(t)
 	ctx := context.Background()
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	log := testutil.Logger()
 
 	hasher := auth.NewHasher(4)
 	tokens := auth.NewTokenManager("test", 15*time.Minute, time.Hour)
@@ -107,10 +92,10 @@ func TestAttendanceHappyPath(t *testing.T) {
 	require.ErrorContains(t, err, "SESSION_NOT_LIVE")
 }
 
-func TestScanRejections(t *testing.T) {
-	store, _ := setup(t)
+func TestServiceScanRejections(t *testing.T) {
+	store := newServiceStore(t)
 	ctx := context.Background()
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	log := testutil.Logger()
 
 	hasher := auth.NewHasher(4)
 	tokens := auth.NewTokenManager("test", 15*time.Minute, time.Hour)
