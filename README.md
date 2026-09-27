@@ -54,6 +54,7 @@ Copy `.env.example` to `.env` and adjust. Variables:
 | `JWT_REFRESH_TTL_HOURS` | `168` | |
 | `QR_TOKEN_TTL_MS` | `1500` | token validity window (buffer over the 1s rotation) |
 | `QR_ROTATION_INTERVAL_MS` | `1000` | |
+| `HTTP_REQUEST_TIMEOUT_SECONDS` | `30` | timeout for regular HTTP requests; the WebSocket QR stream is exempt |
 | `BCRYPT_COST` | `12` | |
 | `ADMIN_SEED_EMAIL` / `ADMIN_SEED_PASSWORD` | — | required in development; seeds one admin if none exists |
 | `CORS_ALLOWED_ORIGINS` | `*` | comma-separated; `*` only for local dev |

@@ -26,6 +26,9 @@ type Config struct {
 	QRTokenTTL         time.Duration
 	QRRotationInterval time.Duration
 
+	// RequestTimeout bounds regular HTTP requests (not WebSocket streams).
+	RequestTimeout time.Duration
+
 	BcryptCost int
 
 	AdminSeedEmail    string
@@ -90,6 +93,12 @@ func Parse(lookup LookupFunc) (*Config, error) {
 		return nil, err
 	}
 	cfg.QRRotationInterval = time.Duration(rotationMs) * time.Millisecond
+
+	timeoutSec, err := getEnvInt(lookup, "HTTP_REQUEST_TIMEOUT_SECONDS", 30)
+	if err != nil {
+		return nil, err
+	}
+	cfg.RequestTimeout = time.Duration(timeoutSec) * time.Second
 
 	cfg.BcryptCost, err = getEnvInt(lookup, "BCRYPT_COST", 12)
 	if err != nil {

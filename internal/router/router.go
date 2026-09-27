@@ -21,6 +21,7 @@ type Deps struct {
 	AuthMW      *auth.Middleware
 	ScanLimiter *middleware.PerUserRateLimiter
 	CORSOrigins []string
+	Timeout     time.Duration // per-request timeout for regular HTTP routes
 	Health      *handlers.HealthHandler
 	Auth        *handlers.AuthHandler
 	Admin       *handlers.AdminHandler
@@ -39,10 +40,18 @@ func New(d Deps) http.Handler {
 	r.Use(middleware.SecurityHeaders)
 	r.Use(middleware.CORS(d.CORSOrigins))
 	r.Use(middleware.RequestLogger(d.Log))
-	r.Use(chimw.Timeout(30 * time.Second))
 
-	r.Get("/healthz", d.Health.Live)
-	r.Get("/readyz", d.Health.Ready)
+	// The timeout applies to regular HTTP routes only. It must not wrap the
+	// WebSocket stream, which lives as long as the class (it would cut the
+	// professor's board off after the timeout).
+	timeout := d.Timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	withTimeout := chimw.Timeout(timeout)
+
+	r.With(withTimeout).Get("/healthz", d.Health.Live)
+	r.With(withTimeout).Get("/readyz", d.Health.Ready)
 
 	authed := func(next http.Handler) http.Handler { return d.AuthMW.AuthRequired(next) }
 	requireAdmin := d.AuthMW.RequireRole(models.RoleAdmin)
@@ -51,6 +60,8 @@ func New(d Deps) http.Handler {
 	requireProfessorOrAdmin := d.AuthMW.RequireRole(models.RoleProfessor, models.RoleAdmin)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(withTimeout)
+
 		// ---- Auth ----
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/login", d.Auth.Login)
@@ -114,7 +125,7 @@ func New(d Deps) http.Handler {
 		})
 	})
 
-	// ---- WebSocket: professor board QR stream ----
+	// ---- WebSocket: professor board QR stream (no request timeout) ----
 	r.Group(func(r chi.Router) {
 		r.Use(authed, requireProfessor)
 		r.Get("/ws/sessions/{session_id}/qr", d.WS.StreamQR)

@@ -33,6 +33,7 @@ func TestParseDefaults(t *testing.T) {
 	assert.Equal(t, 168*time.Hour, cfg.JWTRefreshTTL)
 	assert.Equal(t, 1500*time.Millisecond, cfg.QRTokenTTL)
 	assert.Equal(t, time.Second, cfg.QRRotationInterval)
+	assert.Equal(t, 30*time.Second, cfg.RequestTimeout)
 	assert.Equal(t, 12, cfg.BcryptCost)
 	assert.Equal(t, []string{"*"}, cfg.CORSAllowedOrigins)
 	assert.Equal(t, 5.0, cfg.ScanRateLimitPerSec)
