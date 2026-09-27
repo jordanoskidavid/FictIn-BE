@@ -84,7 +84,9 @@ func NewServer(t testing.TB, opts ...ServerOption) *Server {
 		o(cfg)
 	}
 
-	clk := clock.NewFake(time.Now().UTC())
+	// Whole milliseconds: Postgres keeps microseconds, so a nanosecond start
+	// would make "exactly at expiry" checks drift past stored timestamps.
+	clk := clock.NewFake(time.Now().UTC().Truncate(time.Millisecond))
 	a := app.New(cfg, pool, app.Options{Clock: clk, Log: Logger()})
 
 	srv := httptest.NewServer(a.Handler)

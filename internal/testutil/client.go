@@ -21,6 +21,10 @@ type Client struct {
 // Guest returns an unauthenticated client.
 func (s *Server) Guest() *Client { return &Client{srv: s} }
 
+// WithToken returns a client sending the given raw access token, e.g. one
+// obtained from the login endpoint.
+func (s *Server) WithToken(token string) *Client { return &Client{srv: s, Token: token} }
+
 // AsAdmin, AsProfessor and AsStudent create a fresh user with that role and
 // return a client carrying a valid access token for it.
 func (s *Server) AsAdmin(t testing.TB, opts ...UserOpt) *Client {

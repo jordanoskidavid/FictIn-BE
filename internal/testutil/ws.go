@@ -17,13 +17,19 @@ import (
 // rejected handshake conn is nil and res carries the HTTP status and body.
 func (s *Server) DialWS(t testing.TB, path, token string) (conn *websocket.Conn, res *http.Response, err error) {
 	t.Helper()
-	u := "ws" + strings.TrimPrefix(s.URL, "http") + path
 	if token != "" {
-		u += "?access_token=" + url.QueryEscape(token)
+		path += "?access_token=" + url.QueryEscape(token)
 	}
+	return s.DialWSWithHeader(t, path, nil)
+}
+
+// DialWSWithHeader is DialWS with explicit handshake headers (non-browser clients).
+func (s *Server) DialWSWithHeader(t testing.TB, path string, header http.Header) (conn *websocket.Conn, res *http.Response, err error) {
+	t.Helper()
+	u := "ws" + strings.TrimPrefix(s.URL, "http") + path
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	conn, res, err = websocket.Dial(ctx, u, &websocket.DialOptions{HTTPClient: s.Client()})
+	conn, res, err = websocket.Dial(ctx, u, &websocket.DialOptions{HTTPClient: s.Client(), HTTPHeader: header})
 	if conn != nil {
 		t.Cleanup(func() { _ = conn.CloseNow() })
 	}
