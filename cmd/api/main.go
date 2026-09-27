@@ -10,14 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"fictin/internal/auth"
+	"fictin/internal/app"
 	"fictin/internal/config"
 	"fictin/internal/database"
-	"fictin/internal/handlers"
-	"fictin/internal/middleware"
 	"fictin/internal/repository"
-	"fictin/internal/router"
-	"fictin/internal/service"
 )
 
 func main() {
@@ -52,59 +48,19 @@ func run() error {
 	}
 	defer pool.Close()
 
-	store := repository.NewStore(pool)
-
-	// --- shared components ---
-	hasher := auth.NewHasher(cfg.BcryptCost)
-	tokens := auth.NewTokenManager(cfg.JWTAccessSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
-	authMW := auth.NewMiddleware(tokens)
-
-	qrManager := service.NewQRManager(store, cfg.QRTokenTTL, cfg.QRRotationInterval, log)
-
-	authSvc := service.NewAuthService(store, hasher, tokens)
-	subjectSvc := service.NewSubjectService(store)
-	sessionSvc := service.NewSessionService(store, subjectSvc, qrManager)
-	attendanceSvc := service.NewAttendanceService(store, log)
-	adminSvc := service.NewAdminService(store)
-	studentSvc := service.NewStudentService(store)
-
-	// --- bootstrap admin (development only) ---
-	if cfg.IsDevelopment() {
-		if err := service.SeedAdmin(rootCtx, store, hasher, cfg.AdminSeedEmail, cfg.AdminSeedPassword); err != nil {
-			log.Warn("admin seed skipped", "err", err)
-		}
-	}
-
-	// --- resume rotation for sessions still marked live ---
-	if err := qrManager.ResumeLiveSessions(rootCtx); err != nil {
-		log.Warn("could not resume live sessions", "err", err)
-	}
-
-	scanLimiter := middleware.NewPerUserRateLimiter(cfg.ScanRateLimitPerSec, cfg.ScanRateLimitBurst)
-
-	h := router.New(router.Deps{
-		Log:         log,
-		AuthMW:      authMW,
-		ScanLimiter: scanLimiter,
-		CORSOrigins: cfg.CORSAllowedOrigins,
-		Health:      handlers.NewHealthHandler(pool),
-		Auth:        handlers.NewAuthHandler(authSvc),
-		Admin:       handlers.NewAdminHandler(adminSvc),
-		Subject:     handlers.NewSubjectHandler(subjectSvc),
-		Session:     handlers.NewSessionHandler(sessionSvc, attendanceSvc, qrManager, store),
-		Attendance:  handlers.NewAttendanceHandler(attendanceSvc, studentSvc),
-		WS:          handlers.NewWSHandler(sessionSvc, qrManager, cfg.CORSAllowedOrigins),
-	})
+	// --- wiring, admin seed (development only), resume live sessions ---
+	a := app.New(cfg, pool, app.Options{Log: log})
+	a.Bootstrap(rootCtx, cfg, log)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.AppPort,
-		Handler:           h,
+		Handler:           a.Handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 
 	// --- background cleanup ---
-	cleanupDone := startCleanup(rootCtx, store, log)
+	cleanupDone := startCleanup(rootCtx, a.Store, log)
 
 	// --- serve ---
 	serveErr := make(chan error, 1)
@@ -128,12 +84,11 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("graceful shutdown failed", "err", err)
 	}
-	qrManager.StopAll()
+	a.Close()
 	<-cleanupDone
 	log.Info("bye")
 	return nil
 }
-
 func newLogger(dev bool) *slog.Logger {
 	level := slog.LevelInfo
 	if dev {

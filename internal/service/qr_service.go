@@ -10,7 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"fictin/internal/repository"
+	"fictin/internal/clock"
+	"fictin/internal/models"
 )
 
 // TokenMessage is what a professor's board receives each rotation tick.
@@ -21,10 +22,22 @@ type TokenMessage struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// QRTokenStore persists minted QR tokens (satisfied by *repository.QRTokenRepo).
+type QRTokenStore interface {
+	Insert(ctx context.Context, sessionID uuid.UUID, token string, issuedAt, expiresAt time.Time) (*models.QRToken, error)
+}
+
+// LiveSessionLister lists sessions still marked live (satisfied by *repository.SessionRepo).
+type LiveSessionLister interface {
+	ListLive(ctx context.Context) ([]models.ClassSession, error)
+}
+
 // QRManager runs one rotation goroutine per live session and fans the rotating
 // token out to subscribed WebSocket clients.
 type QRManager struct {
-	store            *repository.Store
+	tokens           QRTokenStore
+	sessions         LiveSessionLister
+	clock            clock.Clock
 	tokenTTL         time.Duration
 	rotationInterval time.Duration
 	log              *slog.Logger
@@ -33,9 +46,11 @@ type QRManager struct {
 	runners map[uuid.UUID]*sessionRunner
 }
 
-func NewQRManager(store *repository.Store, tokenTTL, rotationInterval time.Duration, log *slog.Logger) *QRManager {
+func NewQRManager(tokens QRTokenStore, sessions LiveSessionLister, clk clock.Clock, tokenTTL, rotationInterval time.Duration, log *slog.Logger) *QRManager {
 	return &QRManager{
-		store:            store,
+		tokens:           tokens,
+		sessions:         sessions,
+		clock:            clk,
 		tokenTTL:         tokenTTL,
 		rotationInterval: rotationInterval,
 		log:              log,
@@ -142,11 +157,11 @@ func (m *QRManager) rotate(ctx context.Context, r *sessionRunner) {
 		m.log.Error("qr token generation failed", "session_id", r.sessionID, "err", err)
 		return
 	}
-	issued := time.Now().UTC()
+	issued := m.clock.Now().UTC()
 	expires := issued.Add(m.tokenTTL)
 
 	insCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	row, err := m.store.QRTokens.Insert(insCtx, r.sessionID, tok, issued, expires)
+	row, err := m.tokens.Insert(insCtx, r.sessionID, tok, issued, expires)
 	cancel()
 	if err != nil {
 		m.log.Error("qr token persist failed", "session_id", r.sessionID, "err", err)
@@ -241,7 +256,7 @@ func (r *sessionRunner) currentToken() (TokenMessage, bool) {
 // ResumeLiveSessions restarts rotation goroutines for sessions the DB still
 // marks live (e.g. after a server restart).
 func (m *QRManager) ResumeLiveSessions(ctx context.Context) error {
-	live, err := m.store.Sessions.ListLive(ctx)
+	live, err := m.sessions.ListLive(ctx)
 	if err != nil {
 		return err
 	}

@@ -4,21 +4,37 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 
 	"fictin/internal/apperr"
+	"fictin/internal/clock"
 	"fictin/internal/models"
 	"fictin/internal/repository"
 )
 
 type AttendanceService struct {
 	store *repository.Store
+	clock clock.Clock
 	log   *slog.Logger
 }
 
-func NewAttendanceService(store *repository.Store, log *slog.Logger) *AttendanceService {
-	return &AttendanceService{store: store, log: log}
+func NewAttendanceService(store *repository.Store, clk clock.Clock, log *slog.Logger) *AttendanceService {
+	return &AttendanceService{store: store, clock: clk, log: log}
+}
+
+// checkScanToken decides whether a stored token may mark attendance for
+// sessionID at time now. A token from another session is reported as invalid,
+// not expired, so it reveals nothing about other sessions.
+func checkScanToken(tok *models.QRToken, sessionID uuid.UUID, now time.Time) error {
+	if tok == nil || tok.SessionID != sessionID {
+		return apperr.TokenInvalid
+	}
+	if now.After(tok.ExpiresAt) {
+		return apperr.TokenExpired
+	}
+	return nil
 }
 
 // ScanResult reports the outcome of a scan.
@@ -49,16 +65,21 @@ func (s *AttendanceService) Scan(ctx context.Context, studentID, sessionID uuid.
 		return nil, apperr.SessionNotLive
 	}
 
-	tok, err := s.store.QRTokens.GetForScan(ctx, sessionID, token)
+	tok, err := s.store.QRTokens.GetByToken(ctx, token)
 	switch {
 	case errors.Is(err, repository.ErrNotFound):
 		audit("token_invalid")
 		return nil, apperr.TokenInvalid
-	case errors.Is(err, repository.ErrExpired):
-		audit("token_expired")
-		return nil, apperr.TokenExpired
 	case err != nil:
 		return nil, apperr.Internal.WithCause(err)
+	}
+	if err := checkScanToken(tok, sessionID, s.clock.Now()); err != nil {
+		if errors.Is(err, apperr.TokenExpired) {
+			audit("token_expired")
+		} else {
+			audit("token_invalid")
+		}
+		return nil, err
 	}
 
 	enrolled, err := s.store.Enroll.IsEnrolledInSession(ctx, sessionID, studentID)

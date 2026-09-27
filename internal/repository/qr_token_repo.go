@@ -26,11 +26,9 @@ func (r *QRTokenRepo) Insert(ctx context.Context, sessionID uuid.UUID, token str
 	return &t, nil
 }
 
-// GetValid returns the token row iff it belongs to sessionID and has not expired.
-// Distinguishes "wrong session / unknown" (ErrNotFound) from "expired" (ErrExpired).
-var ErrExpired = errors.New("token expired")
-
-func (r *QRTokenRepo) GetForScan(ctx context.Context, sessionID uuid.UUID, token string) (*models.QRToken, error) {
+// GetByToken looks up a token by value, regardless of session or expiry. The
+// caller decides validity (service.checkScanToken) so it can use an injected clock.
+func (r *QRTokenRepo) GetByToken(ctx context.Context, token string) (*models.QRToken, error) {
 	const q = `SELECT id, session_id, token, issued_at, expires_at
 		FROM qr_tokens WHERE token = $1`
 	var t models.QRToken
@@ -41,12 +39,6 @@ func (r *QRTokenRepo) GetForScan(ctx context.Context, sessionID uuid.UUID, token
 			return nil, ErrNotFound
 		}
 		return nil, err
-	}
-	if t.SessionID != sessionID {
-		return nil, ErrNotFound
-	}
-	if time.Now().UTC().After(t.ExpiresAt) {
-		return &t, ErrExpired
 	}
 	return &t, nil
 }

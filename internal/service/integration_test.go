@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"fictin/internal/auth"
+	"fictin/internal/clock"
 	"fictin/internal/database"
 	"fictin/internal/models"
 	"fictin/internal/repository"
@@ -49,9 +50,9 @@ func TestAttendanceHappyPath(t *testing.T) {
 	tokens := auth.NewTokenManager("test", 15*time.Minute, time.Hour)
 	authSvc := service.NewAuthService(store, hasher, tokens)
 	subjectSvc := service.NewSubjectService(store)
-	qr := service.NewQRManager(store, 1500*time.Millisecond, 1*time.Second, log)
+	qr := service.NewQRManager(store.QRTokens, store.Sessions, clock.Real{}, 1500*time.Millisecond, 1*time.Second, log)
 	sessionSvc := service.NewSessionService(store, subjectSvc, qr)
-	attendanceSvc := service.NewAttendanceService(store, log)
+	attendanceSvc := service.NewAttendanceService(store, clock.Real{}, log)
 
 	// --- users ---
 	prof, err := authSvc.Register(ctx, service.RegisterInput{
@@ -115,9 +116,9 @@ func TestScanRejections(t *testing.T) {
 	tokens := auth.NewTokenManager("test", 15*time.Minute, time.Hour)
 	authSvc := service.NewAuthService(store, hasher, tokens)
 	subjectSvc := service.NewSubjectService(store)
-	qr := service.NewQRManager(store, 1500*time.Millisecond, time.Second, log)
+	qr := service.NewQRManager(store.QRTokens, store.Sessions, clock.Real{}, 1500*time.Millisecond, time.Second, log)
 	sessionSvc := service.NewSessionService(store, subjectSvc, qr)
-	attendanceSvc := service.NewAttendanceService(store, log)
+	attendanceSvc := service.NewAttendanceService(store, clock.Real{}, log)
 	t.Cleanup(func() { qr.StopAll() })
 
 	prof, err := authSvc.Register(ctx, service.RegisterInput{FullName: "P", Email: "p@x.com", Password: "password1", Role: models.RoleProfessor})

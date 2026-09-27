@@ -12,6 +12,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
+	"fictin/internal/clock"
 	"fictin/internal/models"
 )
 
@@ -28,14 +29,28 @@ type TokenManager struct {
 	accessSecret []byte
 	accessTTL    time.Duration
 	refreshTTL   time.Duration
+	clock        clock.Clock
 }
 
-func NewTokenManager(accessSecret string, accessTTL, refreshTTL time.Duration) *TokenManager {
-	return &TokenManager{
+// TokenOption customizes a TokenManager.
+type TokenOption func(*TokenManager)
+
+// WithClock sets the time source used for issuing and validating tokens.
+func WithClock(c clock.Clock) TokenOption {
+	return func(m *TokenManager) { m.clock = c }
+}
+
+func NewTokenManager(accessSecret string, accessTTL, refreshTTL time.Duration, opts ...TokenOption) *TokenManager {
+	m := &TokenManager{
 		accessSecret: []byte(accessSecret),
 		accessTTL:    accessTTL,
 		refreshTTL:   refreshTTL,
+		clock:        clock.Real{},
 	}
+	for _, o := range opts {
+		o(m)
+	}
+	return m
 }
 
 func (m *TokenManager) AccessTTL() time.Duration  { return m.accessTTL }
@@ -43,7 +58,7 @@ func (m *TokenManager) RefreshTTL() time.Duration { return m.refreshTTL }
 
 // GenerateAccessToken returns a signed JWT and its expiry.
 func (m *TokenManager) GenerateAccessToken(u *models.User) (string, time.Time, error) {
-	now := time.Now().UTC()
+	now := m.clock.Now().UTC()
 	exp := now.Add(m.accessTTL)
 	claims := AccessClaims{
 		UserID: u.ID,
@@ -71,7 +86,7 @@ func (m *TokenManager) ParseAccessToken(raw string) (*AccessClaims, error) {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return m.accessSecret, nil
-	}, jwt.WithValidMethods([]string{"HS256"}))
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithTimeFunc(m.clock.Now))
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +105,7 @@ func (m *TokenManager) NewRefreshToken() (raw, hash string, expiresAt time.Time,
 	}
 	raw = base64.RawURLEncoding.EncodeToString(b)
 	hash = HashRefreshToken(raw)
-	expiresAt = time.Now().UTC().Add(m.refreshTTL)
+	expiresAt = m.clock.Now().UTC().Add(m.refreshTTL)
 	return raw, hash, expiresAt, nil
 }
 

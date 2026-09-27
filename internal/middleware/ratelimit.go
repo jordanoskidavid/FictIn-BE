@@ -7,6 +7,7 @@ import (
 
 	"fictin/internal/apperr"
 	"fictin/internal/auth"
+	"fictin/internal/clock"
 	"fictin/internal/httpresponse"
 )
 
@@ -21,11 +22,15 @@ type tokenBucket struct {
 type PerUserRateLimiter struct {
 	rate  float64 // tokens per second
 	burst float64
+	clock clock.Clock
 	mu    sync.Mutex
 	users map[string]*tokenBucket
+
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
-func NewPerUserRateLimiter(ratePerSec float64, burst int) *PerUserRateLimiter {
+func NewPerUserRateLimiter(ratePerSec float64, burst int, clk clock.Clock) *PerUserRateLimiter {
 	if ratePerSec <= 0 {
 		ratePerSec = 5
 	}
@@ -35,16 +40,23 @@ func NewPerUserRateLimiter(ratePerSec float64, burst int) *PerUserRateLimiter {
 	rl := &PerUserRateLimiter{
 		rate:  ratePerSec,
 		burst: float64(burst),
+		clock: clk,
 		users: make(map[string]*tokenBucket),
+		stop:  make(chan struct{}),
 	}
 	go rl.gc()
 	return rl
 }
 
+// Close stops the background cleanup goroutine. Safe to call more than once.
+func (rl *PerUserRateLimiter) Close() {
+	rl.stopOnce.Do(func() { close(rl.stop) })
+}
+
 func (rl *PerUserRateLimiter) allow(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	now := time.Now()
+	now := rl.clock.Now()
 	b, ok := rl.users[key]
 	if !ok {
 		rl.users[key] = &tokenBucket{tokens: rl.burst - 1, last: now}
@@ -63,15 +75,25 @@ func (rl *PerUserRateLimiter) allow(key string) bool {
 func (rl *PerUserRateLimiter) gc() {
 	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
-	for range t.C {
-		rl.mu.Lock()
-		cutoff := time.Now().Add(-10 * time.Minute)
-		for k, b := range rl.users {
-			if b.last.Before(cutoff) {
-				delete(rl.users, k)
-			}
+	for {
+		select {
+		case <-rl.stop:
+			return
+		case <-t.C:
+			rl.purgeIdle()
 		}
-		rl.mu.Unlock()
+	}
+}
+
+// purgeIdle drops buckets that have not been used for 10 minutes.
+func (rl *PerUserRateLimiter) purgeIdle() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	cutoff := rl.clock.Now().Add(-10 * time.Minute)
+	for k, b := range rl.users {
+		if b.last.Before(cutoff) {
+			delete(rl.users, k)
+		}
 	}
 }
 
