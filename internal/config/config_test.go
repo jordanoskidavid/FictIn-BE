@@ -17,10 +17,9 @@ func lookupFrom(env map[string]string) LookupFunc {
 
 func validEnv() map[string]string {
 	return map[string]string{
-		"APP_ENV":            "production",
-		"DATABASE_URL":       "postgres://u:p@localhost/db",
-		"JWT_ACCESS_SECRET":  "a",
-		"JWT_REFRESH_SECRET": "r",
+		"APP_ENV":           "production",
+		"DATABASE_URL":      "postgres://u:p@localhost/db",
+		"JWT_ACCESS_SECRET": "a",
 	}
 }
 
@@ -63,7 +62,7 @@ func TestParseErrors(t *testing.T) {
 		wantErr string
 	}{
 		{"missing database url", func(e map[string]string) { delete(e, "DATABASE_URL") }, "DATABASE_URL"},
-		{"missing both jwt secrets", func(e map[string]string) { delete(e, "JWT_ACCESS_SECRET"); delete(e, "JWT_REFRESH_SECRET") }, "JWT_ACCESS_SECRET, JWT_REFRESH_SECRET"},
+		{"missing access secret and database url", func(e map[string]string) { delete(e, "JWT_ACCESS_SECRET"); delete(e, "DATABASE_URL") }, "DATABASE_URL, JWT_ACCESS_SECRET"},
 		{"empty value counts as missing", func(e map[string]string) { e["JWT_ACCESS_SECRET"] = "" }, "JWT_ACCESS_SECRET"},
 		{"non-numeric int", func(e map[string]string) { e["QR_TOKEN_TTL_MS"] = "fast" }, "QR_TOKEN_TTL_MS"},
 		{"non-numeric float", func(e map[string]string) { e["SCAN_RATE_LIMIT_PER_SEC"] = "x" }, "SCAN_RATE_LIMIT_PER_SEC"},
@@ -79,4 +78,18 @@ func TestParseErrors(t *testing.T) {
 			assert.ErrorContains(t, err, tt.wantErr)
 		})
 	}
+}
+
+// Refresh tokens are opaque values stored hashed in the database, so no
+// refresh signing secret is needed; an old JWT_REFRESH_SECRET is ignored.
+func TestParseDoesNotRequireRefreshSecret(t *testing.T) {
+	env := validEnv()
+	_, ok := env["JWT_REFRESH_SECRET"]
+	require.False(t, ok)
+	_, err := Parse(lookupFrom(env))
+	require.NoError(t, err)
+
+	env["JWT_REFRESH_SECRET"] = "legacy"
+	_, err = Parse(lookupFrom(env))
+	require.NoError(t, err)
 }

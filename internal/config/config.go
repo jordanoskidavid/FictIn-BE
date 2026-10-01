@@ -18,10 +18,9 @@ type Config struct {
 
 	DatabaseURL string
 
-	JWTAccessSecret  string
-	JWTRefreshSecret string
-	JWTAccessTTL     time.Duration
-	JWTRefreshTTL    time.Duration
+	JWTAccessSecret string
+	JWTAccessTTL    time.Duration
+	JWTRefreshTTL   time.Duration
 
 	QRTokenTTL         time.Duration
 	QRRotationInterval time.Duration
@@ -64,7 +63,6 @@ func Parse(lookup LookupFunc) (*Config, error) {
 		AppPort:            getEnv(lookup, "APP_PORT", "8080"),
 		DatabaseURL:        getEnv(lookup, "DATABASE_URL", ""),
 		JWTAccessSecret:    getEnv(lookup, "JWT_ACCESS_SECRET", ""),
-		JWTRefreshSecret:   getEnv(lookup, "JWT_REFRESH_SECRET", ""),
 		AdminSeedEmail:     getEnv(lookup, "ADMIN_SEED_EMAIL", ""),
 		AdminSeedPassword:  getEnv(lookup, "ADMIN_SEED_PASSWORD", ""),
 		CORSAllowedOrigins: splitAndTrim(getEnv(lookup, "CORS_ALLOWED_ORIGINS", "*")),
@@ -127,9 +125,6 @@ func (c *Config) validate() error {
 	}
 	if c.JWTAccessSecret == "" {
 		missing = append(missing, "JWT_ACCESS_SECRET")
-	}
-	if c.JWTRefreshSecret == "" {
-		missing = append(missing, "JWT_REFRESH_SECRET")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))

@@ -53,7 +53,7 @@ Copy `.env.example` to `.env` and adjust. Variables:
 | `APP_ENV` | `development` | `development` enables debug logs + admin seeding |
 | `APP_PORT` | `8080` | |
 | `DATABASE_URL` | — | **required**, `postgres://user:pass@host:5432/db?sslmode=disable` |
-| `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | — | **required** |
+| `JWT_ACCESS_SECRET` | — | **required**; signs access tokens (refresh tokens are opaque and stored hashed, so no refresh secret is needed) |
 | `JWT_ACCESS_TTL_MINUTES` | `30` | |
 | `JWT_REFRESH_TTL_HOURS` | `168` | |
 | `QR_TOKEN_TTL_MS` | `1500` | token validity window (buffer over the 1s rotation) |
