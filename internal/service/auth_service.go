@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -96,31 +97,46 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Token
 	if !u.IsActive {
 		return nil, apperr.AccountInactive
 	}
-	return s.issuePair(ctx, u)
+	return s.issuePair(ctx, u, uuid.New()) // a login starts a new token family
 }
 
+// Refresh rotates a refresh token: the presented token is consumed atomically
+// and a new pair in the same family is issued. Presenting a token that was
+// already rotated means a copy is in someone else's hands, so the whole
+// family is revoked (the attacker and the victim must both log in again).
 func (s *AuthService) Refresh(ctx context.Context, rawRefresh string) (*TokenPair, error) {
+	invalid := apperr.Unauthorized.WithDetails("refresh token invalid or expired")
 	hash := auth.HashRefreshToken(strings.TrimSpace(rawRefresh))
-	rt, err := s.store.Refresh.GetActiveByHash(ctx, hash)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, apperr.Unauthorized.WithDetails("refresh token invalid or expired")
+
+	rt, err := s.store.Refresh.Consume(ctx, hash)
+	if errors.Is(err, repository.ErrNotFound) {
+		old, lookupErr := s.store.Refresh.GetByHash(ctx, hash)
+		if lookupErr == nil && old.RevokedAt != nil {
+			n, revokeErr := s.store.Refresh.RevokeFamily(ctx, old.FamilyID)
+			if revokeErr != nil {
+				return nil, apperr.Internal.WithCause(revokeErr)
+			}
+			slog.WarnContext(ctx, "refresh token reuse detected; family revoked",
+				"user_id", old.UserID, "family_id", old.FamilyID, "revoked", n)
 		}
+		return nil, invalid
+	}
+	if err != nil {
 		return nil, apperr.Internal.WithCause(err)
 	}
+
 	u, err := s.store.Users.GetByID(ctx, rt.UserID)
 	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, invalid
+		}
 		return nil, apperr.Internal.WithCause(err)
 	}
 	if !u.IsActive {
 		_ = s.store.Refresh.RevokeAllForUser(ctx, u.ID)
 		return nil, apperr.AccountInactive
 	}
-	// Rotate: revoke the used token, issue a fresh pair.
-	if err := s.store.Refresh.RevokeByHash(ctx, hash); err != nil {
-		return nil, apperr.Internal.WithCause(err)
-	}
-	return s.issuePair(ctx, u)
+	return s.issuePair(ctx, u, rt.FamilyID)
 }
 
 func (s *AuthService) Logout(ctx context.Context, rawRefresh string) error {
@@ -165,7 +181,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, curr
 	return nil
 }
 
-func (s *AuthService) issuePair(ctx context.Context, u *models.User) (*TokenPair, error) {
+func (s *AuthService) issuePair(ctx context.Context, u *models.User, familyID uuid.UUID) (*TokenPair, error) {
 	access, _, err := s.tokens.GenerateAccessToken(u)
 	if err != nil {
 		return nil, apperr.Internal.WithCause(err)
@@ -174,7 +190,7 @@ func (s *AuthService) issuePair(ctx context.Context, u *models.User) (*TokenPair
 	if err != nil {
 		return nil, apperr.Internal.WithCause(err)
 	}
-	if err := s.store.Refresh.Create(ctx, u.ID, hash, expiresAt); err != nil {
+	if err := s.store.Refresh.Create(ctx, u.ID, familyID, hash, expiresAt); err != nil {
 		return nil, apperr.Internal.WithCause(err)
 	}
 	return &TokenPair{

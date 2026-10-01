@@ -3,11 +3,15 @@
 package integration
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -207,7 +211,7 @@ func TestAuth_Refresh(t *testing.T) {
 
 	t.Run("expired token is rejected", func(t *testing.T) {
 		raw := "expired-refresh-token-" + u.ID.String()
-		err := srv.App.Store.Refresh.Create(context.Background(), u.ID, auth.HashRefreshToken(raw), time.Now().Add(-time.Minute))
+		err := srv.App.Store.Refresh.Create(context.Background(), u.ID, uuid.New(), auth.HashRefreshToken(raw), time.Now().Add(-time.Minute))
 		require.NoError(t, err)
 		refresh(t, srv, raw).RequireError(t, http.StatusUnauthorized, "UNAUTHORIZED")
 	})
@@ -225,19 +229,72 @@ func TestAuth_Refresh(t *testing.T) {
 	})
 }
 
+// Presenting a refresh token that was already rotated means it was copied
+// (stolen): the whole login chain ("family") is revoked, so neither the thief
+// nor the victim can keep refreshing it. Other logins are unaffected.
 func TestAuth_RefreshTokenReuseRevokesFamily(t *testing.T) {
-	testutil.KnownIssue(t, "(security) reusing an already-rotated refresh token is rejected, "+
-		"but the tokens issued from it stay valid; reuse should revoke the whole family")
 	t.Parallel()
 	srv := testutil.NewServer(t)
 	u := srv.Factory.User(t, models.RoleStudent)
 
-	first := loginOK(t, srv, u.Email, testutil.DefaultPassword)
-	var second tokenPair
-	refresh(t, srv, first.RefreshToken).RequireStatus(t, http.StatusOK).Data(t, &second)
+	laptop := loginOK(t, srv, u.Email, testutil.DefaultPassword) // family A
+	phone := loginOK(t, srv, u.Email, testutil.DefaultPassword)  // family B
 
-	refresh(t, srv, first.RefreshToken).RequireStatus(t, http.StatusUnauthorized) // theft detected
-	refresh(t, srv, second.RefreshToken).RequireStatus(t, http.StatusUnauthorized)
+	var a2, a3 tokenPair
+	refresh(t, srv, laptop.RefreshToken).RequireStatus(t, http.StatusOK).Data(t, &a2)
+	refresh(t, srv, a2.RefreshToken).RequireStatus(t, http.StatusOK).Data(t, &a3)
+
+	// Replaying the first token is detected and rejected...
+	refresh(t, srv, laptop.RefreshToken).RequireError(t, http.StatusUnauthorized, "UNAUTHORIZED")
+	// ...and kills the newest token of that family too.
+	refresh(t, srv, a3.RefreshToken).RequireError(t, http.StatusUnauthorized, "UNAUTHORIZED")
+
+	// The other device's family keeps working.
+	refresh(t, srv, phone.RefreshToken).RequireStatus(t, http.StatusOK)
+}
+
+// Rotation is atomic: of several simultaneous refreshes with the same token,
+// exactly one succeeds (previously all of them could, forking the session).
+func TestAuth_ConcurrentRefreshRotatesOnce(t *testing.T) {
+	t.Parallel()
+	srv := testutil.NewServer(t)
+	u := srv.Factory.User(t, models.RoleStudent)
+	p := loginOK(t, srv, u.Email, testutil.DefaultPassword)
+	body, err := json.Marshal(map[string]string{"refresh_token": p.RefreshToken})
+	require.NoError(t, err)
+
+	const n = 8
+	statuses := make([]int, n)
+	errs := make([]error, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			res, err := srv.Client().Post(srv.URL+"/api/v1/auth/refresh", "application/json", bytes.NewReader(body))
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			_ = res.Body.Close()
+			statuses[i] = res.StatusCode
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	ok := 0
+	for i := range n {
+		require.NoError(t, errs[i])
+		if statuses[i] == http.StatusOK {
+			ok++
+		} else {
+			assert.Equal(t, http.StatusUnauthorized, statuses[i])
+		}
+	}
+	assert.Equal(t, 1, ok, "statuses: %v", statuses)
 }
 
 func TestAuth_Logout(t *testing.T) {

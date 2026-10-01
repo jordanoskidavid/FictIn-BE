@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -171,8 +172,8 @@ func TestResilience_CleanupJobPurgesStaleTokensAndStops(t *testing.T) {
 
 	stale := srv.Factory.QRToken(t, room.Session.ID, now.Add(-4*time.Hour), 1500*time.Millisecond)
 	fresh := srv.Factory.QRToken(t, room.Session.ID, now, 1500*time.Millisecond)
-	require.NoError(t, srv.App.Store.Refresh.Create(ctx, room.Student.ID, auth.HashRefreshToken("expired"), now.Add(-time.Hour)))
-	require.NoError(t, srv.App.Store.Refresh.Create(ctx, room.Student.ID, auth.HashRefreshToken("valid"), now.Add(time.Hour)))
+	require.NoError(t, srv.App.Store.Refresh.Create(ctx, room.Student.ID, uuid.New(), auth.HashRefreshToken("expired"), now.Add(-time.Hour)))
+	require.NoError(t, srv.App.Store.Refresh.Create(ctx, room.Student.ID, uuid.New(), auth.HashRefreshToken("valid"), now.Add(time.Hour)))
 
 	tokenExists := func(token string) bool {
 		var ok bool

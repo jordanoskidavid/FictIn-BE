@@ -49,6 +49,7 @@ type User struct {
 type RefreshToken struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
+	FamilyID  uuid.UUID // login chain; reuse of a rotated token revokes the family
 	TokenHash string
 	ExpiresAt time.Time
 	RevokedAt *time.Time
