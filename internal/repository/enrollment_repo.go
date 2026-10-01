@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -18,7 +19,7 @@ type EnrolledStudent struct {
 	FullName     string    `json:"full_name"`
 	Email        string    `json:"email"`
 	StudentCode  *string   `json:"student_code,omitempty"`
-	EnrolledAt   string    `json:"enrolled_at"`
+	EnrolledAt   string    `json:"enrolled_at"` // RFC3339 UTC, see FormatTimestamp
 }
 
 func (r *EnrollmentRepo) Create(ctx context.Context, subjectID, studentID uuid.UUID) (*models.Enrollment, error) {
@@ -66,7 +67,7 @@ func (r *EnrollmentRepo) IsEnrolledInSession(ctx context.Context, sessionID, stu
 }
 
 func (r *EnrollmentRepo) ListStudents(ctx context.Context, subjectID uuid.UUID) ([]EnrolledStudent, error) {
-	const q = `SELECT e.id, u.id, u.full_name, u.email, u.student_code, e.created_at::text
+	const q = `SELECT e.id, u.id, u.full_name, u.email, u.student_code, e.created_at
 		FROM enrollments e
 		JOIN users u ON u.id = e.student_id
 		WHERE e.subject_id = $1
@@ -79,9 +80,11 @@ func (r *EnrollmentRepo) ListStudents(ctx context.Context, subjectID uuid.UUID) 
 	out := []EnrolledStudent{} // never nil: empty lists render as [] in JSON
 	for rows.Next() {
 		var s EnrolledStudent
-		if err := rows.Scan(&s.EnrollmentID, &s.StudentID, &s.FullName, &s.Email, &s.StudentCode, &s.EnrolledAt); err != nil {
+		var enrolledAt time.Time
+		if err := rows.Scan(&s.EnrollmentID, &s.StudentID, &s.FullName, &s.Email, &s.StudentCode, &enrolledAt); err != nil {
 			return nil, err
 		}
+		s.EnrolledAt = FormatTimestamp(enrolledAt)
 		out = append(out, s)
 	}
 	return out, rows.Err()

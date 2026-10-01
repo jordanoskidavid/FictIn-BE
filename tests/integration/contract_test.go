@@ -4,6 +4,7 @@ package integration
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,7 @@ var (
 	rosterShape = shape{
 		required: []string{"enrollment_id", "student_id", "full_name", "email", "enrolled_at"},
 		optional: []string{"student_code"},
+		times:    []string{"enrolled_at"},
 	}
 	attendanceRowShape = shape{
 		required: []string{"id", "session_id", "subject_id", "subject_name", "subject_code", "student_id", "student_name", "scanned_at"},
@@ -71,7 +73,8 @@ var (
 	}
 )
 
-// assertShape checks the exact JSON field set and that timestamps are RFC3339.
+// assertShape checks the exact JSON field set and that timestamps are RFC3339
+// in UTC ("...Z"), as FrontendDirections.md §2 promises.
 func assertShape(t *testing.T, s shape, obj map[string]any) {
 	t.Helper()
 	for _, k := range s.required {
@@ -88,6 +91,7 @@ func assertShape(t *testing.T, s shape, obj map[string]any) {
 			if assert.True(t, isStr, "%s must be a string", k) {
 				_, err := time.Parse(time.RFC3339, str)
 				assert.NoError(t, err, "%s = %q is not RFC3339", k, str)
+				assert.True(t, strings.HasSuffix(str, "Z"), "%s = %q is not in UTC", k, str)
 			}
 		}
 	}
