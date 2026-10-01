@@ -44,11 +44,11 @@ func (r *SubjectRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Subjec
 }
 
 func (r *SubjectRepo) ListByProfessor(ctx context.Context, professorID uuid.UUID) ([]models.Subject, error) {
-	return r.list(ctx, `SELECT `+subjectCols+` FROM subjects WHERE professor_id = $1 ORDER BY created_at DESC`, professorID)
+	return r.list(ctx, `SELECT `+subjectCols+` FROM subjects WHERE professor_id = $1 ORDER BY created_at DESC, id DESC`, professorID)
 }
 
 func (r *SubjectRepo) ListAll(ctx context.Context) ([]models.Subject, error) {
-	return r.list(ctx, `SELECT `+subjectCols+` FROM subjects ORDER BY created_at DESC`)
+	return r.list(ctx, `SELECT `+subjectCols+` FROM subjects ORDER BY created_at DESC, id DESC`)
 }
 
 func (r *SubjectRepo) list(ctx context.Context, q string, args ...any) ([]models.Subject, error) {
@@ -107,6 +107,6 @@ func (r *SubjectRepo) ListForStudent(ctx context.Context, studentID uuid.UUID) (
 		FROM subjects s
 		JOIN enrollments e ON e.subject_id = s.id
 		WHERE e.student_id = $1
-		ORDER BY s.name`
+		ORDER BY s.name, s.id`
 	return r.list(ctx, q, studentID)
 }

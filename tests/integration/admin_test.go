@@ -3,7 +3,9 @@
 package integration
 
 import (
+	"context"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -104,7 +106,8 @@ func TestAdmin_ListAndFilterUsers(t *testing.T) {
 		page2 := ids(admin.Get(t, "/api/v1/admin/users?limit=2&offset=2"))
 		assert.Len(t, page1, 2)
 		assert.Len(t, page2, 2)
-		// No overlap assertion: ORDER BY created_at has no tiebreaker (reported as a follow-up).
+		assert.NotContains(t, page2, page1[0])
+		assert.NotContains(t, page2, page1[1])
 	})
 
 	t.Run("invalid role filter", func(t *testing.T) {
@@ -185,4 +188,61 @@ func TestAdmin_ListSubjectsAndSessions(t *testing.T) {
 	// Admin may read any session.
 	view := admin.Get(t, "/api/v1/sessions/"+b.Session.ID.String()).RequireStatus(t, http.StatusOK).DataMap(t)
 	assertShape(t, sessionViewShape, view)
+}
+
+// Rows with identical timestamps still have a total order (newest first, then
+// id), so offset pagination never repeats or skips a row.
+func TestAdmin_PaginationIsStableWhenTimestampsTie(t *testing.T) {
+	t.Parallel()
+	srv := testutil.NewServer(t)
+	admin := srv.AsAdmin(t)
+	ctx := context.Background()
+	for range 6 {
+		srv.Factory.User(t, models.RoleStudent)
+	}
+	room := srv.Factory.Classroom(t)
+	for range 4 {
+		s := srv.Factory.User(t, models.RoleStudent)
+		srv.Factory.Enroll(t, room.Subject.ID, s.ID)
+		srv.Factory.Attendance(t, room.Session.ID, s.ID)
+	}
+	_, err := srv.Pool.Exec(ctx, `UPDATE users SET created_at = '2026-09-01T10:00:00Z'`)
+	require.NoError(t, err)
+	_, err = srv.Pool.Exec(ctx, `UPDATE attendance_records SET scanned_at = '2026-09-01T10:00:00Z'`)
+	require.NoError(t, err)
+
+	collect := func(t *testing.T, base string, total int) []string {
+		var ids []string
+		for offset := 0; offset < total; offset += 2 {
+			var page []map[string]any
+			admin.Get(t, base+"limit=2&offset="+strconv.Itoa(offset)).RequireStatus(t, http.StatusOK).Data(t, &page)
+			for _, row := range page {
+				ids = append(ids, row["id"].(string))
+			}
+		}
+		return ids
+	}
+	idsFromDB := func(t *testing.T, q string) []string {
+		rows, err := srv.Pool.Query(ctx, q)
+		require.NoError(t, err)
+		defer rows.Close()
+		var ids []string
+		for rows.Next() {
+			var id string
+			require.NoError(t, rows.Scan(&id))
+			ids = append(ids, id)
+		}
+		return ids
+	}
+
+	t.Run("users", func(t *testing.T) {
+		want := idsFromDB(t, `SELECT id::text FROM users ORDER BY id DESC`)
+		require.Len(t, want, 13) // admin + 6 + classroom (2) + 4
+		assert.Equal(t, want, collect(t, "/api/v1/admin/users?", len(want)))
+	})
+	t.Run("attendance", func(t *testing.T) {
+		want := idsFromDB(t, `SELECT id::text FROM attendance_records ORDER BY id DESC`)
+		require.Len(t, want, 4)
+		assert.Equal(t, want, collect(t, "/api/v1/admin/attendance?", len(want)))
+	})
 }

@@ -87,7 +87,7 @@ func (r *AttendanceRepo) List(ctx context.Context, f ListFilter) ([]AttendanceRo
 	if f.Limit <= 0 || f.Limit > 1000 {
 		f.Limit = 200
 	}
-	q += " ORDER BY ar.scanned_at DESC LIMIT $" + itoa(i) + " OFFSET $" + itoa(i+1)
+	q += " ORDER BY ar.scanned_at DESC, ar.id DESC LIMIT $" + itoa(i) + " OFFSET $" + itoa(i+1)
 	args = append(args, f.Limit, f.Offset)
 
 	rows, err := r.db.Query(ctx, q, args...)

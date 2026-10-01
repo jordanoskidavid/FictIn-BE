@@ -71,7 +71,7 @@ func (r *EnrollmentRepo) ListStudents(ctx context.Context, subjectID uuid.UUID) 
 		FROM enrollments e
 		JOIN users u ON u.id = e.student_id
 		WHERE e.subject_id = $1
-		ORDER BY u.full_name`
+		ORDER BY u.full_name, e.id`
 	rows, err := r.db.Query(ctx, q, subjectID)
 	if err != nil {
 		return nil, err

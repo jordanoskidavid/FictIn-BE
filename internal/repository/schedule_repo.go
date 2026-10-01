@@ -47,7 +47,7 @@ func (r *ScheduleRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Class
 
 func (r *ScheduleRepo) ListBySubject(ctx context.Context, subjectID uuid.UUID) ([]models.ClassSchedule, error) {
 	const q = `SELECT ` + scheduleCols + ` FROM class_schedules WHERE subject_id = $1
-		ORDER BY day_of_week, start_time`
+		ORDER BY day_of_week, start_time, id`
 	rows, err := r.db.Query(ctx, q, subjectID)
 	if err != nil {
 		return nil, err

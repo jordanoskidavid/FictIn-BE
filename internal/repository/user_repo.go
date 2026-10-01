@@ -101,7 +101,7 @@ func (r *UserRepo) List(ctx context.Context, p ListUsersParams) ([]models.User, 
 	if p.Limit <= 0 || p.Limit > 200 {
 		p.Limit = 50
 	}
-	q := fmt.Sprintf(`SELECT %s FROM users %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d`,
+	q := fmt.Sprintf(`SELECT %s FROM users %s ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d`,
 		userCols, where, i, i+1)
 	args = append(args, p.Limit, p.Offset)
 

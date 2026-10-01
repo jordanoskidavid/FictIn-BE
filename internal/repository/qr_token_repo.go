@@ -47,7 +47,7 @@ func (r *QRTokenRepo) GetByToken(ctx context.Context, token string) (*models.QRT
 func (r *QRTokenRepo) Latest(ctx context.Context, sessionID uuid.UUID) (*models.QRToken, error) {
 	const q = `SELECT id, session_id, token, issued_at, expires_at
 		FROM qr_tokens WHERE session_id = $1
-		ORDER BY issued_at DESC LIMIT 1`
+		ORDER BY issued_at DESC, id DESC LIMIT 1`
 	var t models.QRToken
 	err := r.db.QueryRow(ctx, q, sessionID).
 		Scan(&t.ID, &t.SessionID, &t.Token, &t.IssuedAt, &t.ExpiresAt)

@@ -57,11 +57,11 @@ func (r *SessionRepo) Stop(ctx context.Context, id uuid.UUID) (*models.ClassSess
 }
 
 func (r *SessionRepo) ListLive(ctx context.Context) ([]models.ClassSession, error) {
-	return r.list(ctx, `SELECT `+sessionCols+` FROM class_sessions WHERE status = 'live' ORDER BY started_at`)
+	return r.list(ctx, `SELECT `+sessionCols+` FROM class_sessions WHERE status = 'live' ORDER BY started_at, id`)
 }
 
 func (r *SessionRepo) ListBySubject(ctx context.Context, subjectID uuid.UUID) ([]models.ClassSession, error) {
-	return r.list(ctx, `SELECT `+sessionCols+` FROM class_sessions WHERE subject_id = $1 ORDER BY created_at DESC`, subjectID)
+	return r.list(ctx, `SELECT `+sessionCols+` FROM class_sessions WHERE subject_id = $1 ORDER BY created_at DESC, id DESC`, subjectID)
 }
 
 func (r *SessionRepo) list(ctx context.Context, q string, args ...any) ([]models.ClassSession, error) {
