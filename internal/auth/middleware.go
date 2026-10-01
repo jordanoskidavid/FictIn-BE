@@ -1,21 +1,34 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"fictin/internal/apperr"
 	"fictin/internal/httpresponse"
 	"fictin/internal/models"
 )
 
-// Middleware bundles the auth dependencies needed by HTTP middleware.
-type Middleware struct {
-	tokens *TokenManager
+// AccountStates looks up the live state of the account behind a token
+// (satisfied by *repository.UserRepo).
+type AccountStates interface {
+	AccountState(ctx context.Context, userID uuid.UUID) (models.AccountState, error)
 }
 
-func NewMiddleware(tokens *TokenManager) *Middleware {
-	return &Middleware{tokens: tokens}
+// Middleware bundles the auth dependencies needed by HTTP middleware.
+type Middleware struct {
+	tokens   *TokenManager
+	accounts AccountStates
+}
+
+// NewMiddleware builds the auth middleware. accounts is consulted on every
+// authenticated request so deactivation and forced password changes apply
+// immediately; nil skips the check (tests of token handling only).
+func NewMiddleware(tokens *TokenManager, accounts AccountStates) *Middleware {
+	return &Middleware{tokens: tokens, accounts: accounts}
 }
 
 // AuthRequired validates the bearer access token and injects the Identity.
@@ -36,7 +49,39 @@ func (m *Middleware) AuthRequired(next http.Handler) http.Handler {
 			return
 		}
 		id := Identity{UserID: claims.UserID, Role: claims.Role, Email: claims.Email}
+		if m.accounts != nil {
+			state, err := m.accounts.AccountState(r.Context(), claims.UserID)
+			if err != nil {
+				httpresponse.FromError(w, r, apperr.Internal.WithCause(err))
+				return
+			}
+			if !state.Exists || !state.Active {
+				// 401 (not 403) so clients drop the token; refreshing fails too
+				// and logging in again reports ACCOUNT_INACTIVE.
+				httpresponse.FromError(w, r, apperr.Unauthorized.WithDetails("account is deactivated or no longer exists"))
+				return
+			}
+			id.MustChangePassword = state.MustChangePassword
+		}
 		next.ServeHTTP(w, r.WithContext(WithIdentity(r.Context(), id)))
+	})
+}
+
+// RequirePasswordChanged blocks accounts that still have a temporary password
+// (403 PASSWORD_CHANGE_REQUIRED). Mount it after AuthRequired on every route
+// except the ones needed to change the password (/auth/me, /auth/change-password).
+func (m *Middleware) RequirePasswordChanged(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := FromContext(r.Context())
+		if !ok {
+			httpresponse.FromError(w, r, apperr.Unauthorized)
+			return
+		}
+		if id.MustChangePassword {
+			httpresponse.FromError(w, r, apperr.PasswordChangeRequired)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

@@ -132,15 +132,55 @@ func TestAuth_MustChangePasswordFlow(t *testing.T) {
 	loginOK(t, srv, u.Email, "NewPass123!")
 }
 
+// A user with a temporary password may only read their profile and change
+// the password; everything else is 403 PASSWORD_CHANGE_REQUIRED until then.
 func TestAuth_MustChangePasswordIsEnforcedServerSide(t *testing.T) {
-	testutil.KnownIssue(t, "(security) must_change_password is only a flag for the frontend; "+
-		"the API does not block a user with a temporary password from using other endpoints")
 	t.Parallel()
 	srv := testutil.NewServer(t)
-	stud := srv.AsStudent(t, testutil.MustChangePassword())
+	room := srv.Factory.Classroom(t)
 
-	stud.Get(t, "/api/v1/student/subjects").RequireStatus(t, http.StatusForbidden)
-	stud.Get(t, "/api/v1/auth/me").RequireStatus(t, http.StatusOK) // still allowed
+	stud := srv.AsStudent(t, testutil.MustChangePassword(), testutil.WithPassword("TempPass123!"))
+	prof := srv.AsProfessor(t, testutil.MustChangePassword())
+	admin := srv.AsAdmin(t, testutil.MustChangePassword())
+
+	blocked := []struct {
+		name         string
+		client       *testutil.Client
+		method, path string
+		body         any
+	}{
+		{"student subjects", stud, "GET", "/api/v1/student/subjects", nil},
+		{"student history", stud, "GET", "/api/v1/student/attendance", nil},
+		{"student scan", stud, "POST", "/api/v1/attendance/scan", scanBody(room.Session.ID, "whatever-token")},
+		{"professor subjects", prof, "GET", "/api/v1/subjects", nil},
+		{"professor create subject", prof, "POST", "/api/v1/subjects", map[string]string{"name": "Blocked", "code": "BLK1"}},
+		{"admin users", admin, "GET", "/api/v1/admin/users", nil},
+		{"admin register", admin, "POST", "/api/v1/auth/register", map[string]string{"full_name": "X Y", "email": "x@example.test", "password": "TempPass123!", "role": "admin"}},
+	}
+	for _, tt := range blocked {
+		t.Run("blocked: "+tt.name, func(t *testing.T) {
+			tt.client.Do(t, tt.method, tt.path, tt.body).RequireError(t, http.StatusForbidden, "PASSWORD_CHANGE_REQUIRED")
+		})
+	}
+
+	t.Run("blocked: websocket board", func(t *testing.T) {
+		conn, hs, err := srv.DialWS(t, "/ws/sessions/"+room.Session.ID.String()+"/qr", prof.Token)
+		require.Error(t, err)
+		require.Nil(t, conn)
+		assert.Equal(t, http.StatusForbidden, hs.StatusCode)
+		assert.Contains(t, string(hs.Body), "PASSWORD_CHANGE_REQUIRED")
+	})
+
+	t.Run("allowed: profile shows the flag", func(t *testing.T) {
+		me := stud.Get(t, "/api/v1/auth/me").RequireStatus(t, http.StatusOK).DataMap(t)
+		assert.Equal(t, true, me["must_change_password"])
+	})
+
+	t.Run("the same access token works once the password is changed", func(t *testing.T) {
+		stud.Post(t, "/api/v1/auth/change-password", map[string]string{"current_password": "TempPass123!", "new_password": "NewPass123!"}).
+			RequireStatus(t, http.StatusOK)
+		stud.Get(t, "/api/v1/student/subjects").RequireStatus(t, http.StatusOK)
+	})
 }
 
 func TestAuth_Refresh(t *testing.T) {
@@ -231,16 +271,47 @@ func TestAuth_Me(t *testing.T) {
 	assert.NotContains(t, string(res.Body), "password_hash")
 }
 
+// Access tokens stop working as soon as the account is deactivated or
+// deleted, not only when they expire.
 func TestAuth_DeactivationRevokesAccessTokens(t *testing.T) {
-	testutil.KnownIssue(t, "(security) deactivation revokes refresh tokens only; an access "+
-		"token already issued keeps working until it expires (up to JWT_ACCESS_TTL_MINUTES)")
 	t.Parallel()
 	srv := testutil.NewServer(t)
-	stud := srv.AsStudent(t)
+	admin := srv.AsAdmin(t)
 
-	srv.AsAdmin(t).Patch(t, "/api/v1/admin/users/"+stud.User.ID.String(), map[string]any{"is_active": false}).
-		RequireStatus(t, http.StatusOK)
-	stud.Get(t, "/api/v1/auth/me").RequireStatus(t, http.StatusUnauthorized)
+	t.Run("deactivated", func(t *testing.T) {
+		stud := srv.AsStudent(t)
+		prof := srv.AsProfessor(t)
+		sessionID := srv.Factory.LiveSession(t, srv.Factory.Subject(t, prof.User.ID).ID).ID.String()
+
+		for _, u := range []*testutil.Client{stud, prof} {
+			admin.Patch(t, "/api/v1/admin/users/"+u.User.ID.String(), map[string]any{"is_active": false}).
+				RequireStatus(t, http.StatusOK)
+		}
+		stud.Get(t, "/api/v1/auth/me").RequireError(t, http.StatusUnauthorized, "UNAUTHORIZED")
+		stud.Get(t, "/api/v1/student/subjects").RequireError(t, http.StatusUnauthorized, "UNAUTHORIZED")
+		prof.Get(t, "/api/v1/subjects").RequireError(t, http.StatusUnauthorized, "UNAUTHORIZED")
+
+		conn, hs, err := srv.DialWS(t, "/ws/sessions/"+sessionID+"/qr", prof.Token)
+		require.Error(t, err)
+		assert.Nil(t, conn)
+		assert.Equal(t, http.StatusUnauthorized, hs.StatusCode)
+
+		// Logging in again explains why.
+		login(t, srv, stud.User.Email, testutil.DefaultPassword).RequireError(t, http.StatusForbidden, "ACCOUNT_INACTIVE")
+	})
+
+	t.Run("deleted", func(t *testing.T) {
+		stud := srv.AsStudent(t)
+		admin.Delete(t, "/api/v1/admin/users/"+stud.User.ID.String()).RequireStatus(t, http.StatusNoContent)
+		stud.Get(t, "/api/v1/auth/me").RequireError(t, http.StatusUnauthorized, "UNAUTHORIZED")
+	})
+
+	t.Run("an admin cannot keep using a deactivated admin token", func(t *testing.T) {
+		other := srv.AsAdmin(t)
+		admin.Patch(t, "/api/v1/admin/users/"+other.User.ID.String(), map[string]any{"is_active": false}).
+			RequireStatus(t, http.StatusOK)
+		other.Get(t, "/api/v1/admin/users").RequireError(t, http.StatusUnauthorized, "UNAUTHORIZED")
+	})
 }
 
 func TestAuth_ExpiredAccessToken(t *testing.T) {

@@ -55,7 +55,13 @@ func New(d Deps) http.Handler {
 	r.With(withTimeout).Get("/healthz", d.Health.Live)
 	r.With(withTimeout).Get("/readyz", d.Health.Ready)
 
-	authed := func(next http.Handler) http.Handler { return d.AuthMW.AuthRequired(next) }
+	// authed: valid token, active account, and no pending temporary password.
+	// authedAllowTempPassword drops the last check for the two routes a user
+	// needs in order to change a temporary password.
+	authed := func(next http.Handler) http.Handler {
+		return d.AuthMW.AuthRequired(d.AuthMW.RequirePasswordChanged(next))
+	}
+	authedAllowTempPassword := d.AuthMW.AuthRequired
 	requireAdmin := d.AuthMW.RequireRole(models.RoleAdmin)
 	requireProfessor := d.AuthMW.RequireRole(models.RoleProfessor)
 	requireStudent := d.AuthMW.RequireRole(models.RoleStudent)
@@ -71,7 +77,7 @@ func New(d Deps) http.Handler {
 			r.Post("/logout", d.Auth.Logout)
 
 			r.Group(func(r chi.Router) {
-				r.Use(authed)
+				r.Use(authedAllowTempPassword)
 				r.Get("/me", d.Auth.Me)
 				r.Post("/change-password", d.Auth.ChangePassword)
 			})

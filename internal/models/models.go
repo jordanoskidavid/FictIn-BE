@@ -106,3 +106,12 @@ type AttendanceRecord struct {
 	QRTokenID *uuid.UUID `json:"qr_token_id,omitempty"`
 	ScannedAt time.Time  `json:"scanned_at"`
 }
+
+// AccountState is the live state of a user account, checked on every
+// authenticated request so deactivation and forced password changes take
+// effect immediately rather than when the access token expires.
+type AccountState struct {
+	Exists             bool
+	Active             bool
+	MustChangePassword bool
+}

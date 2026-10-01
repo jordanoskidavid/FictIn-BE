@@ -56,16 +56,18 @@ func As(err error) *Error {
 
 // Common reusable errors.
 var (
-	Internal        = New(http.StatusInternalServerError, "INTERNAL", "an internal error occurred")
-	Unauthorized    = New(http.StatusUnauthorized, "UNAUTHORIZED", "authentication required or invalid")
-	Forbidden       = New(http.StatusForbidden, "FORBIDDEN", "you do not have permission to perform this action")
-	NotFound        = New(http.StatusNotFound, "NOT_FOUND", "resource not found")
-	Conflict        = New(http.StatusConflict, "CONFLICT", "resource conflict")
-	Validation      = New(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "request validation failed")
-	BadRequest      = New(http.StatusBadRequest, "BAD_REQUEST", "malformed request")
-	RateLimited     = New(http.StatusTooManyRequests, "RATE_LIMITED", "too many requests, slow down")
-	InvalidCreds    = New(http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
-	AccountInactive = New(http.StatusForbidden, "ACCOUNT_INACTIVE", "this account has been deactivated")
+	Internal               = New(http.StatusInternalServerError, "INTERNAL", "an internal error occurred")
+	Unauthorized           = New(http.StatusUnauthorized, "UNAUTHORIZED", "authentication required or invalid")
+	Forbidden              = New(http.StatusForbidden, "FORBIDDEN", "you do not have permission to perform this action")
+	NotFound               = New(http.StatusNotFound, "NOT_FOUND", "resource not found")
+	Conflict               = New(http.StatusConflict, "CONFLICT", "resource conflict")
+	Validation             = New(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "request validation failed")
+	BadRequest             = New(http.StatusBadRequest, "BAD_REQUEST", "malformed request")
+	RateLimited            = New(http.StatusTooManyRequests, "RATE_LIMITED", "too many requests, slow down")
+	InvalidCreds           = New(http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
+	AccountInactive        = New(http.StatusForbidden, "ACCOUNT_INACTIVE", "this account has been deactivated")
+	PasswordChangeRequired = New(http.StatusForbidden, "PASSWORD_CHANGE_REQUIRED",
+		"change your temporary password before continuing")
 
 	// Attendance-scan specific (spec §7.3).
 	TokenExpired   = New(http.StatusGone, "TOKEN_EXPIRED", "the QR token has expired")

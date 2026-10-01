@@ -1,12 +1,15 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -29,7 +32,7 @@ func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 func TestAuthRequired(t *testing.T) {
 	clk := clock.NewFake(t0)
 	tm := NewTokenManager("secret", time.Minute, time.Hour, WithClock(clk))
-	mw := NewMiddleware(tm)
+	mw := NewMiddleware(tm, nil)
 
 	user := testUser(models.RoleProfessor)
 	valid, _, err := tm.GenerateAccessToken(user)
@@ -90,13 +93,13 @@ func TestAuthRequired(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/x", nil)
 		req.Header.Set("Authorization", "Bearer "+tok)
 		rec := httptest.NewRecorder()
-		NewMiddleware(tm).AuthRequired(http.NotFoundHandler()).ServeHTTP(rec, req)
+		NewMiddleware(tm, nil).AuthRequired(http.NotFoundHandler()).ServeHTTP(rec, req)
 		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 }
 
 func TestRequireRole(t *testing.T) {
-	mw := NewMiddleware(NewTokenManager("s", time.Minute, time.Hour))
+	mw := NewMiddleware(NewTokenManager("s", time.Minute, time.Hour), nil)
 	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 
 	tests := []struct {
@@ -142,3 +145,83 @@ func TestIdentityHelpers(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+type fakeAccounts struct {
+	state models.AccountState
+	err   error
+}
+
+func (f fakeAccounts) AccountState(context.Context, uuid.UUID) (models.AccountState, error) {
+	return f.state, f.err
+}
+
+func TestAuthRequiredChecksLiveAccountState(t *testing.T) {
+	tm := NewTokenManager("secret", time.Minute, time.Hour, WithClock(clock.NewFake(t0)))
+	user := testUser(models.RoleStudent)
+	tok, _, err := tm.GenerateAccessToken(user)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name           string
+		accounts       fakeAccounts
+		wantStatus     int
+		wantCode       string
+		wantMustChange bool
+	}{
+		{"active account", fakeAccounts{state: models.AccountState{Exists: true, Active: true}}, http.StatusOK, "", false},
+		{"temporary password is flagged", fakeAccounts{state: models.AccountState{Exists: true, Active: true, MustChangePassword: true}}, http.StatusOK, "", true},
+		{"deactivated account", fakeAccounts{state: models.AccountState{Exists: true, Active: false}}, http.StatusUnauthorized, "UNAUTHORIZED", false},
+		{"deleted account", fakeAccounts{state: models.AccountState{}}, http.StatusUnauthorized, "UNAUTHORIZED", false},
+		{"lookup failure", fakeAccounts{err: errors.New("db down")}, http.StatusInternalServerError, "INTERNAL", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got Identity
+			h := NewMiddleware(tm, tt.accounts).AuthRequired(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = MustIdentity(r.Context())
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/x", nil)
+			req.Header.Set("Authorization", "Bearer "+tok)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.wantStatus, rec.Code)
+			if tt.wantCode != "" {
+				assert.Equal(t, tt.wantCode, errorCode(t, rec))
+				return
+			}
+			assert.Equal(t, user.ID, got.UserID)
+			assert.Equal(t, tt.wantMustChange, got.MustChangePassword)
+		})
+	}
+}
+
+func TestRequirePasswordChanged(t *testing.T) {
+	mw := NewMiddleware(NewTokenManager("s", time.Minute, time.Hour), nil)
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	tests := []struct {
+		name       string
+		identity   *Identity
+		wantStatus int
+		wantCode   string
+	}{
+		{"password already changed", &Identity{Role: models.RoleStudent}, http.StatusOK, ""},
+		{"temporary password", &Identity{Role: models.RoleStudent, MustChangePassword: true}, http.StatusForbidden, "PASSWORD_CHANGE_REQUIRED"},
+		{"no identity", nil, http.StatusUnauthorized, "UNAUTHORIZED"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/x", nil)
+			if tt.identity != nil {
+				req = req.WithContext(WithIdentity(req.Context(), *tt.identity))
+			}
+			rec := httptest.NewRecorder()
+			mw.RequirePasswordChanged(ok).ServeHTTP(rec, req)
+			assert.Equal(t, tt.wantStatus, rec.Code)
+			if tt.wantCode != "" {
+				assert.Equal(t, tt.wantCode, errorCode(t, rec))
+			}
+		})
+	}
+}

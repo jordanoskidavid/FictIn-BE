@@ -17,6 +17,9 @@ type Identity struct {
 	UserID uuid.UUID
 	Role   models.Role
 	Email  string
+
+	// MustChangePassword is the live account flag (temporary password).
+	MustChangePassword bool
 }
 
 func (i Identity) IsAdmin() bool     { return i.Role == models.RoleAdmin }

@@ -52,7 +52,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, opts Options) *App {
 
 	hasher := auth.NewHasher(cfg.BcryptCost)
 	tokens := auth.NewTokenManager(cfg.JWTAccessSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL, auth.WithClock(clk))
-	authMW := auth.NewMiddleware(tokens)
+	authMW := auth.NewMiddleware(tokens, store.Users)
 
 	qrManager := service.NewQRManager(store.QRTokens, store.Sessions, clk, cfg.QRTokenTTL, cfg.QRRotationInterval, log)
 

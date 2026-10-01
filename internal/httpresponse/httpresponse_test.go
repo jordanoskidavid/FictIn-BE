@@ -91,6 +91,7 @@ func TestFromErrorMapsDomainErrors(t *testing.T) {
 		{apperr.RateLimited, 429, "RATE_LIMITED"},
 		{apperr.InvalidCreds, 401, "INVALID_CREDENTIALS"},
 		{apperr.AccountInactive, 403, "ACCOUNT_INACTIVE"},
+		{apperr.PasswordChangeRequired, 403, "PASSWORD_CHANGE_REQUIRED"},
 		{apperr.TokenExpired, 410, "TOKEN_EXPIRED"},
 		{apperr.TokenInvalid, 400, "TOKEN_INVALID"},
 		{apperr.SessionNotLive, 409, "SESSION_NOT_LIVE"},

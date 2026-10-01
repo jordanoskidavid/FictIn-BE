@@ -190,3 +190,18 @@ func (r *UserRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+// AccountState returns the live account state for the auth middleware. A
+// missing user is reported as Exists=false, not as an error.
+func (r *UserRepo) AccountState(ctx context.Context, id uuid.UUID) (models.AccountState, error) {
+	s := models.AccountState{Exists: true}
+	err := r.db.QueryRow(ctx, `SELECT is_active, must_change_password FROM users WHERE id = $1`, id).
+		Scan(&s.Active, &s.MustChangePassword)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.AccountState{}, nil
+	}
+	if err != nil {
+		return models.AccountState{}, err
+	}
+	return s, nil
+}
