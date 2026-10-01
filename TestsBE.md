@@ -1,21 +1,21 @@
 # Backend Testing Summary
 
 What was built to test the Go + PostgreSQL backend, what the tests cover,
-which bugs they found, and what is still open. For how to run and write tests,
-see [CONTRIBUTING.md](CONTRIBUTING.md).
+which bugs they found and how those were fixed, and what is still open. For
+how to run and write tests, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## At a glance
 
 | | |
 |---|---|
-| Test functions | **102** (45 unit, 57 integration); **458** passing checks including subtests |
-| Known-issue tests (skipped) | 9 (they check the correct behavior for bugs that aren't fixed yet) |
-| Coverage, full suite | **84.1%** of statements, `cmd/api` included |
-| Coverage, unit tests alone | 22.3% (most logic needs the database) |
+| Test functions | **109** (49 unit, 60 integration); **517** passing checks including subtests |
+| Skipped tests | **0**: every known issue has been fixed |
+| Coverage, full suite | **83.9%** of statements, `cmd/api` included |
+| Coverage, unit tests alone | 23.5% (most logic needs the database) |
 | CI minimum | 75% |
-| Stability | 25 full runs in a row with no failures, plus a shuffled-order run |
-| Bugs fixed with a regression test | 3 |
-| Bugs documented as known issues | 7 (6 known-issue tests plus a linter finding) |
+| Stability | Every full run green (25 in a row after the last infrastructure fix), plus a shuffled-order run |
+| Bugs found by the tests and fixed | **14** (13 in the application, 1 in the test infrastructure), each with a regression test |
+| Open bugs | None known; see [Not covered](#not-covered-limitations-and-verification-status) for limitations |
 
 ## How the tests are organized
 
@@ -73,16 +73,20 @@ doesn't contain `test`, and it only ever creates and drops databases named
 | JWT access tokens | Round trip for all 3 roles; expiry at the exact second (fake clock); rejection of tokens with another secret, `alg: none`, HS512, a missing user id, a tampered payload or garbage |
 | Refresh tokens | Random, only the hash is stored, expiry taken from the clock |
 | Auth middleware | 401 for a missing, malformed, foreign or expired token; `Bearer` and `?access_token=` (WebSocket) both accepted; the user identity passed to handlers |
+| Live account state | With a fake account store: an active account passes; a deactivated or deleted account → 401; a lookup failure → 500; a temporary password is flagged on the identity |
+| Password-change gate | Temporary password → 403 `PASSWORD_CHANGE_REQUIRED`; changed password passes; no identity → 401 |
 | Role checks | 403 for every wrong role, including unknown roles; 401 without an identity |
-| Response envelope | The `{data}` shape, status helpers, 204 with an empty body, the `{error}` shape with and without `details` |
-| Error mapping | All 15 domain errors map to the right HTTP status and error code; wrapped errors keep their code; unexpected errors become a 500 without leaking internal messages |
-| Request validation | Empty, malformed, oversized and unknown-field JSON bodies (400); the validation rules of every request type (422, with per-field details) |
+| Client IP | Forwarding headers ignored by default (no spoofing); behind a trusted proxy the rightmost `X-Forwarded-For` entry is used and client-injected entries, `X-Real-IP` and garbage are ignored; IPv6 |
+| Response envelope | The `{data}` shape, status helpers, 204 with an empty body, a nil list sent as `[]`, the `{error}` shape with and without `details` |
+| Error mapping | All 15 domain errors (including `PASSWORD_CHANGE_REQUIRED`) map to the right HTTP status and error code; wrapped errors keep their code; unexpected errors become a 500 without leaking internal messages |
+| Request validation | Empty, malformed, oversized and unknown-field JSON bodies (400); the validation rules of every request type (422), with `details` keyed by the exact JSON field names (`session_id`, `student_id`, …) |
 | QR tokens | Valid up to exactly the expiry time and expired 1ms later; a token from another session is invalid; tokens are 32 random URL-safe bytes and never repeat |
 | QR rotation manager | First token minted immediately with the clock's time; rotation reaches all subscribed boards; stop closes the boards; start is idempotent; a token that failed to save is never shown; live sessions resume after a restart; logs never contain full tokens |
 | CSV export | Header row, one row per record, commas/quotes/newlines escaped (RFC 4180), empty cells, a header-only file for no data, the download headers |
 | Rate limiter | Burst size, separate budget per user, refill over time (fake clock), removal of idle users |
-| Configuration | Defaults, overrides, missing required settings, invalid numbers, bcrypt range, development requires the seed admin |
-| Other | Role validity, schedule time parsing, the `TEST_POSTGRES_URL` safety guard |
+| Configuration | Defaults, overrides, missing required settings, invalid numbers and booleans, bcrypt range, development requires the seed admin, `JWT_REFRESH_SECRET` no longer required |
+| Schedule times | `HH:MM`, `HH:MM:SS` and single-digit hours parse and normalize to `HH:MM:SS`; invalid times rejected; times compare as times of day (9:30 is before 10:00) |
+| Other | Role validity, the `TEST_POSTGRES_URL` safety guard |
 
 ## Integration tests (real HTTP + PostgreSQL)
 
@@ -97,10 +101,17 @@ doesn't contain `test`, and it only ever creates and drops databases named
   - change-password rejects a wrong current password (401), the same password again (422) and a password that is too short (422)
   - success returns **200** `{"status":"password_changed"}`
   - after the change, the flag is cleared, all refresh tokens are revoked, the old password fails and the new one works
+- **Temporary password is enforced by the server:**
+  - for a student, a professor and an admin with a temporary password, every other endpoint returns 403 `PASSWORD_CHANGE_REQUIRED`; this covers subjects, history, scanning, creating subjects, listing users, registering users and the WebSocket board
+  - `/auth/me` and change-password stay available
+  - the same access token works immediately after the password is changed
+- **Deactivation and deletion take effect immediately:**
+  - an existing access token → 401 on REST endpoints and the WebSocket handshake, for students, professors and admins
+  - logging in again explains why (`ACCOUNT_INACTIVE`)
 - **Refresh tokens:**
-  - a valid token rotates the pair
-  - reused, expired and unknown tokens → 401
-  - a deactivated user can't refresh
+  - a valid token rotates the pair; reused, expired and unknown tokens → 401; a deactivated user can't refresh
+  - **stolen-token detection:** replaying an already-rotated token revokes that whole login chain (the newest token stops working too), while the user's other logins keep working
+  - **atomic rotation:** 8 simultaneous refreshes with one token → exactly one succeeds
 - **Logout** returns `{"status":"logged_out"}` and revokes the refresh token; logging out again is harmless.
 - **Other:** `/auth/me` returns the documented user fields and never the password hash; an expired access token → 401.
 
@@ -117,6 +128,7 @@ doesn't contain `test`, and it only ever creates and drops databases named
   - duplicate email (also with different letter case) or duplicate student code → 409
   - student without a code, invalid role or weak password → 422
 - **List users:** filters by role and by active/inactive, pagination, and an invalid filter → 422.
+- **Stable pagination:** with identical timestamps forced on every row, paging two at a time through users and through attendance returns every row exactly once, in a fixed order (newest first, then by id).
 - **Update users:** rename; deactivate, which blocks login and refresh; reactivate, which restores them. A taken student code → 409, a blank name → 422, an unknown user → 404, a bad id → 400.
 - **Delete users:** → 204, a second delete → 404, and the deleted user can't log in.
 - The admin sees every professor's subjects and can open any session.
@@ -130,7 +142,9 @@ doesn't contain `test`, and it only ever creates and drops databases named
 - **Update and delete:**
   - update changes the name and code; a code taken by another subject → 409; keeping its own code is fine; an empty update changes nothing
   - delete → 204 and also removes that subject's sessions and attendance
-- **Schedules:** created and listed; end before or equal to start, a bad time format or a day out of range → 422.
+- **Schedules:**
+  - created and listed; end before or equal to start, a bad time format or a day out of range → 422
+  - times are compared as times of day and stored as `HH:MM:SS`: 9:30–10:00 and 08:05–9:45 are accepted; 10:00–10:00:00, 10:00–9:59 and 23:00–24:00 → 422 (never a 500)
 - **Enrollments:**
   - by student id, or by student code (surrounding spaces trimmed)
   - already enrolled → 409, unknown student → 404, a non-student or inactive student → 422
@@ -187,55 +201,91 @@ doesn't contain `test`, and it only ever creates and drops databases named
   - keeps fresh tokens and valid refresh tokens
   - exits when the server shuts down
 
-### Frontend contract
-The JSON field names of every response type are compared with
-`FrontendDirections.md`: users, subjects, sessions, schedules, enrollments,
-rosters, attendance rows and records, QR token messages and the login
-response. A missing, renamed or leaked field (for example `password_hash`)
-fails the test, and every timestamp must be RFC3339.
+### Migrations
+- Every migration can be rolled back and re-applied: all down scripts run, then all up scripts, and the schema works again.
 
-## Bugs found and fixed (each with a regression test)
+### Frontend contract
+- **Field names:** the JSON fields of every response type are compared with
+  `FrontendDirections.md`: users, subjects, sessions, schedules, enrollments,
+  rosters, attendance rows and records, QR token messages and the login
+  response. A missing, renamed or leaked field (for example `password_hash`)
+  fails the test.
+- **Timestamps:** every timestamp must be RFC3339 in UTC (ending in `Z`). This
+  is checked on a machine in a non-UTC time zone.
+- **Empty lists:** 8 list endpoints, and the nested lists in subject detail,
+  return `[]` (never `null`) when empty.
+
+## Bugs found and fixed
+
+For each bug, a test for the correct behavior was written first and seen to
+fail; then the code was fixed and the test passed.
+
+### Security
 
 | Bug | Fix | Test |
 |---|---|---|
-| `scanned_at` came back as `"2026-09-27 20:43:13.58+02"` (database text format, local time zone) in attendance lists and the CSV, and with a local offset in scan responses | Always RFC3339 UTC, e.g. `2026-09-13T10:15:30Z`. No frontend change needed. | `TestAttendance_ScannedAtIsRFC3339UTCEverywhere` |
-| The professor's QR board was disconnected after 30 seconds by the request timeout | The WebSocket stream is excluded from the timeout, which is now configurable (`HTTP_REQUEST_TIMEOUT_SECONDS`) | `TestWS_BoardOutlivesRequestTimeout` |
-| Test infrastructure: cleaning up a test database could fail when Postgres's autovacuum was running in it (non-superuser test role only) | New connections are blocked first, and the drop is retried briefly | 25 full runs in a row without failures |
+| A user with a temporary password could use the whole API; `must_change_password` was only a hint for the frontend | Every endpoint except `/auth/me` and change-password returns 403 `PASSWORD_CHANGE_REQUIRED` until the password is changed | `TestAuth_MustChangePasswordIsEnforcedServerSide` |
+| Deactivated or deleted users kept full access (REST and WebSocket) until their access token expired, up to 30 minutes | The live account state is checked on every authenticated request; such accounts get 401 | `TestAuth_DeactivationRevokesAccessTokens` |
+| A stolen refresh token went unnoticed: replaying an old token was rejected, but the tokens issued after it stayed valid | Tokens belong to a login chain ("family", migration `000002`); replaying a rotated token revokes the whole family | `TestAuth_RefreshTokenReuseRevokesFamily` |
+| Simultaneous refreshes with one token could all succeed (2 of 8 in testing), forking the session | Rotation is a single atomic database update; exactly one wins | `TestAuth_ConcurrentRefreshRotatesOnce` |
+| Client IP addresses could be spoofed through `X-Forwarded-For` / `X-Real-IP` (chi `RealIP`) | New `ClientIP` middleware ignores those headers unless `TRUST_PROXY_HEADERS=true`, and then only trusts the entry the proxy wrote | `TestClientIP` |
 
-## Known issues (tests written, skipped until fixed)
+### Frontend contract
 
-Each test checks the **correct** behavior. They are skipped by default so the
-suite stays green, and run with `RUN_KNOWN_ISSUES=1`. All of them were
-confirmed to fail today.
+| Bug | Fix | Test |
+|---|---|---|
+| `scanned_at` came back as `"2026-09-27 20:43:13.58+02"` (database text format, local time zone) | RFC3339 UTC everywhere, e.g. `2026-09-13T10:15:30Z` | `TestAttendance_ScannedAtIsRFC3339UTCEverywhere` |
+| All other timestamps used the server's local time zone (`+02:00`), and `enrolled_at` used the database text format | The database driver returns UTC; `enrolled_at` is formatted like `scanned_at` | contract checks (`assertShape`) in every integration test |
+| Empty lists came back as `{"data": null}`, including the nested `schedules` and `roster` | Lists are always arrays: `[]` | `TestEmptyListsAreArrays`, `TestNilSliceRendersAsEmptyArray` |
+| Validation errors named ID fields `session_i_d`, `student_i_d`, `schedule_i_d` | `details` uses the exact JSON field names | `TestRequestValidation` |
 
-| # | Issue | Severity | Test |
-|---|---|---|---|
-| 1 | `must_change_password` isn't enforced by the API; a user with a temporary password can use every endpoint | Security | `TestAuth_MustChangePasswordIsEnforcedServerSide` |
-| 2 | Deactivating a user doesn't cut off their current access token (it keeps working up to 30 minutes) | Security | `TestAuth_DeactivationRevokesAccessTokens` |
-| 3 | Reusing an old refresh token doesn't revoke the tokens issued after it (no stolen-token detection) | Security | `TestAuth_RefreshTokenReuseRevokesFamily` |
-| 4 | Empty lists return `{"data": null}` instead of `[]` | Frontend contract | `TestProfessor_EmptyListsAreNullNotArrays` |
-| 5 | Validation errors name ID fields wrongly (`session_i_d` instead of `session_id`) | Frontend contract | `TestRequestValidation` (3 cases), `TestToSnake/SessionID` |
-| 6 | Schedule times are compared as text: a 9:30–10:00 slot is rejected, and 10:00–10:00:00 causes a 500 | Bug | `TestProfessor_ScheduleTimesCompareAsTimes` |
+### Other bugs
 
-Also reported, without a test:
+| Bug | Fix | Test |
+|---|---|---|
+| The professor's QR board was disconnected after 30 seconds by the request timeout | The WebSocket stream is excluded from the timeout (now configurable with `HTTP_REQUEST_TIMEOUT_SECONDS`) | `TestWS_BoardOutlivesRequestTimeout` |
+| Schedule times were compared as text: 9:30–10:00 was rejected, and 10:00–10:00:00 or 10:00–9:59 caused a 500 | Times are compared as times of day and stored as `HH:MM:SS` | `TestProfessor_ScheduleTimesCompareAsTimes`, `TestParseTimeOfDay` |
+| Pagination could repeat or skip rows when timestamps were equal | Every list query orders by its timestamp/name, then by id | `TestAdmin_PaginationIsStableWhenTimestampsTie` |
+| Startup failed without `JWT_REFRESH_SECRET`, although nothing used it | No longer required (an existing value is ignored) | `TestParseDoesNotRequireRefreshSecret` |
+| Test infrastructure: deleting a test database could fail while Postgres autovacuum was running in it | New connections are blocked first, and the delete is retried briefly | 25 full runs in a row with no failures |
 
-- **Security (linter finding):** the `RealIP` middleware trusts client-supplied
-  IP headers, which allows IP spoofing.
-- **Frontend contract:** other timestamps (`created_at`, `updated_at`, …) use
-  the server's local time zone instead of UTC, and `enrolled_at` uses the
-  database text format.
-- **Frontend contract:** `FrontendDirections.md` says rejected WebSocket
-  connections are "closed", but they actually fail the handshake with an HTTP
-  error.
-- **Frontend contract:** `ALREADY_MARKED` is listed as an error, but it is a
-  200 response.
-- **Minor:**
-  - `JWT_REFRESH_SECRET` is required but unused.
-  - User pagination has no tiebreaker, so pages can be inconsistent when
-    timestamps tie.
+### Documentation fixes in `FrontendDirections.md`
 
-## Not covered, and verification status
+- Rejected WebSocket connections fail the **handshake** with an HTTP error;
+  they are not opened and then closed. The doc explains what the browser sees
+  (an `error` event, then close code `1006`).
+- `ALREADY_MARKED` is not an error code; a repeat scan is a 200 with
+  `status: "already_marked"`. The unused error value was also removed from
+  the code.
+- New sections cover `PASSWORD_CHANGE_REQUIRED`, deactivation, refresh-token
+  reuse detection, lists always being arrays, validation field names and the
+  schedule time format.
 
+## Changes the frontend needs
+
+1. Handle **403 `PASSWORD_CHANGE_REQUIRED`** by showing the change-password
+   screen.
+2. Make the token-refresh interceptor **single-flight**. Concurrent 401s must
+   wait for one `/auth/refresh` call; refreshing twice with the same token now
+   counts as theft and ends that login.
+3. A deactivated user now gets **401** on the next request. The existing
+   flow (refresh fails, back to login, login shows `ACCOUNT_INACTIVE`)
+   handles it.
+
+Everything else is backwards compatible: field types are unchanged, and
+timestamps and lists now match what the doc already promised.
+
+## Not covered, limitations and verification status
+
+- **An open WebSocket board keeps streaming after its professor is
+  deactivated.** Account state is checked when the connection opens, not
+  while it is open. The stream ends when the session stops or the professor
+  reconnects.
+- **Reactivation revives old access tokens.** An access token issued before
+  a deactivation works again if the account is reactivated before the token
+  expires (up to 30 minutes). Refresh tokens stay revoked.
+- **Every authenticated request now costs one extra database query** to read
+  the live account state (a primary-key lookup).
 - **`cmd/api` (`main`) isn't tested:** reading the environment, signal
   handling and the HTTP server's graceful shutdown. It is kept deliberately
   thin; everything it starts (wiring, startup tasks, the cleanup job and its
