@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -210,8 +211,26 @@ func dropDatabase(ctx context.Context, adminURL, name string) error {
 		return err
 	}
 	defer func() { _ = admin.Close(ctx) }()
-	_, err = admin.Exec(ctx, `DROP DATABASE IF EXISTS `+pgx.Identifier{name}.Sanitize()+` WITH (FORCE)`)
-	return err
+	ident := pgx.Identifier{name}.Sanitize()
+
+	// Stop new connections first: autovacuum skips such databases. A worker
+	// that is already running belongs to the superuser, and a non-superuser
+	// (TEST_POSTGRES_URL) may not terminate it, so retry until it finishes.
+	_, _ = admin.Exec(ctx, `ALTER DATABASE `+ident+` WITH ALLOW_CONNECTIONS false`)
+	for {
+		_, err = admin.Exec(ctx, `DROP DATABASE IF EXISTS `+ident+` WITH (FORCE)`)
+		var pgErr *pgconn.PgError
+		retryable := errors.As(err, &pgErr) &&
+			(pgErr.Code == "42501" /* insufficient_privilege */ || pgErr.Code == "55006" /* object_in_use */)
+		if !retryable {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("drop %s: %w (last error: %w)", name, ctx.Err(), err)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // withDatabase returns dsn with its database name replaced.

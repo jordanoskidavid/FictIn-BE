@@ -269,3 +269,53 @@ func TestProfessor_StartSessionWithSchedule(t *testing.T) {
 	prof.Post(t, "/api/v1/sessions/00000000-0000-0000-0000-000000000000/start", nil).
 		RequireError(t, http.StatusNotFound, "NOT_FOUND")
 }
+
+func TestProfessor_UpdateSubjectValidation(t *testing.T) {
+	t.Parallel()
+	srv := testutil.NewServer(t)
+	prof := srv.AsProfessor(t)
+	subj := srv.Factory.Subject(t, prof.User.ID, testutil.WithSubjectCode("KEEP1"))
+	srv.Factory.Subject(t, srv.Factory.User(t, models.RoleProfessor).ID, testutil.WithSubjectCode("TAKEN1"))
+	path := "/api/v1/subjects/" + subj.ID.String()
+
+	tests := []struct {
+		name       string
+		body       any
+		wantStatus int
+		wantCode   string
+	}{
+		{"code taken by another subject", map[string]string{"code": "TAKEN1"}, 409, "CONFLICT"},
+		{"code taken, different case", map[string]string{"code": "taken1"}, 409, "CONFLICT"},
+		{"name too short", map[string]string{"name": "X"}, 422, "VALIDATION_ERROR"},
+		{"unknown field", map[string]string{"professor_id": prof.User.ID.String()}, 400, "BAD_REQUEST"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prof.Patch(t, path, tt.body).RequireError(t, tt.wantStatus, tt.wantCode)
+		})
+	}
+
+	t.Run("empty patch keeps the subject unchanged", func(t *testing.T) {
+		got := prof.Patch(t, path, map[string]string{}).RequireStatus(t, http.StatusOK).DataMap(t)
+		assert.Equal(t, "KEEP1", got["code"])
+	})
+	t.Run("keeping its own code is not a conflict", func(t *testing.T) {
+		prof.Patch(t, path, map[string]string{"code": "keep1"}).RequireStatus(t, http.StatusOK)
+	})
+}
+
+func TestProfessor_EnrollByCodeTrimsWhitespace(t *testing.T) {
+	t.Parallel()
+	srv := testutil.NewServer(t)
+	prof := srv.AsProfessor(t)
+	subj := srv.Factory.Subject(t, prof.User.ID)
+	stud := srv.Factory.User(t, models.RoleStudent, testutil.WithStudentCode("S-777"))
+
+	var e map[string]any
+	prof.Post(t, "/api/v1/subjects/"+subj.ID.String()+"/enrollments", map[string]string{"student_code": "  S-777 "}).
+		RequireStatus(t, http.StatusCreated).Data(t, &e)
+	assert.Equal(t, stud.ID.String(), e["student_id"])
+
+	prof.Post(t, "/api/v1/subjects/"+subj.ID.String()+"/enrollments", map[string]string{"student_code": "   "}).
+		RequireError(t, http.StatusUnprocessableEntity, "VALIDATION_ERROR")
+}

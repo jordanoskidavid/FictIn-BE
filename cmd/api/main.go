@@ -13,7 +13,6 @@ import (
 	"fictin/internal/app"
 	"fictin/internal/config"
 	"fictin/internal/database"
-	"fictin/internal/repository"
 )
 
 func main() {
@@ -60,7 +59,7 @@ func run() error {
 	}
 
 	// --- background cleanup ---
-	cleanupDone := startCleanup(rootCtx, a.Store, log)
+	cleanupDone := app.StartCleanup(rootCtx, a.Store, log)
 
 	// --- serve ---
 	serveErr := make(chan error, 1)
@@ -95,38 +94,4 @@ func newLogger(dev bool) *slog.Logger {
 		level = slog.LevelDebug
 	}
 	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
-}
-
-// startCleanup purges stale qr_tokens and expired refresh_tokens periodically.
-func startCleanup(ctx context.Context, store *repository.Store, log *slog.Logger) <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		t := time.NewTicker(30 * time.Minute)
-		defer t.Stop()
-		purge := func() {
-			c, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-			if n, err := store.QRTokens.DeleteOlderThan(c, time.Now().UTC().Add(-3*time.Hour)); err != nil {
-				log.Warn("qr token cleanup failed", "err", err)
-			} else if n > 0 {
-				log.Info("purged stale qr tokens", "count", n)
-			}
-			if n, err := store.Refresh.DeleteExpired(c, time.Now().UTC()); err != nil {
-				log.Warn("refresh token cleanup failed", "err", err)
-			} else if n > 0 {
-				log.Info("purged expired refresh tokens", "count", n)
-			}
-		}
-		purge()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				purge()
-			}
-		}
-	}()
-	return done
 }
