@@ -47,15 +47,12 @@ func TestSuccessEnvelope(t *testing.T) {
 	}
 }
 
-// Documents current behavior: a nil slice is rendered as {"data": null}, not
-// []. Repositories build lists with `var out []T`, so empty list endpoints
-// return null although FrontendDirections.md promises an array. Reported as a
-// contract mismatch; change this test if the backend starts returning [].
-func TestNilSliceRendersAsNull(t *testing.T) {
+// List endpoints must never send null: the frontend iterates over them.
+func TestNilSliceRendersAsEmptyArray(t *testing.T) {
 	rec := httptest.NewRecorder()
 	var rows []string
 	OK(rec, rows)
-	assert.JSONEq(t, `{"data":null}`, rec.Body.String())
+	assert.JSONEq(t, `{"data":[]}`, rec.Body.String())
 }
 
 func TestNoContent(t *testing.T) {

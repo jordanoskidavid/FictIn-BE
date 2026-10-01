@@ -95,7 +95,7 @@ func (r *AttendanceRepo) List(ctx context.Context, f ListFilter) ([]AttendanceRo
 		return nil, err
 	}
 	defer rows.Close()
-	var out []AttendanceRow
+	out := []AttendanceRow{} // never nil: empty lists render as [] in JSON
 	for rows.Next() {
 		var a AttendanceRow
 		var scannedAt time.Time

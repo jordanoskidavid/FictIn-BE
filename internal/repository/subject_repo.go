@@ -57,7 +57,7 @@ func (r *SubjectRepo) list(ctx context.Context, q string, args ...any) ([]models
 		return nil, err
 	}
 	defer rows.Close()
-	var out []models.Subject
+	out := []models.Subject{} // never nil: empty lists render as [] in JSON
 	for rows.Next() {
 		s, err := scanSubject(rows)
 		if err != nil {

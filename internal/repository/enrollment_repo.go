@@ -76,7 +76,7 @@ func (r *EnrollmentRepo) ListStudents(ctx context.Context, subjectID uuid.UUID) 
 		return nil, err
 	}
 	defer rows.Close()
-	var out []EnrolledStudent
+	out := []EnrolledStudent{} // never nil: empty lists render as [] in JSON
 	for rows.Next() {
 		var s EnrolledStudent
 		if err := rows.Scan(&s.EnrollmentID, &s.StudentID, &s.FullName, &s.Email, &s.StudentCode, &s.EnrolledAt); err != nil {

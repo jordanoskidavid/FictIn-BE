@@ -53,7 +53,7 @@ func (r *ScheduleRepo) ListBySubject(ctx context.Context, subjectID uuid.UUID) (
 		return nil, err
 	}
 	defer rows.Close()
-	var out []models.ClassSchedule
+	out := []models.ClassSchedule{} // never nil: empty lists render as [] in JSON
 	for rows.Next() {
 		s, err := scanSchedule(rows)
 		if err != nil {

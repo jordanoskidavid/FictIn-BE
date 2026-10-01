@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"reflect"
 )
 
 type envelope struct {
@@ -22,8 +23,12 @@ type Error struct {
 	Details any    `json:"details,omitempty"`
 }
 
-// JSON writes an arbitrary payload wrapped in {"data": ...}.
+// JSON writes an arbitrary payload wrapped in {"data": ...}. A nil slice is
+// sent as [] so clients can always iterate over list responses.
 func JSON(w http.ResponseWriter, status int, data any) {
+	if v := reflect.ValueOf(data); v.Kind() == reflect.Slice && v.IsNil() {
+		data = []any{}
+	}
 	write(w, status, envelope{Data: data})
 }
 

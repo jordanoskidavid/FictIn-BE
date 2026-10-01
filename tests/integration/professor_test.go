@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -59,14 +60,45 @@ func TestProfessor_ListOnlyOwnSubjects(t *testing.T) {
 	assert.Equal(t, mine.ID.String(), subjects[0]["id"])
 }
 
-func TestProfessor_EmptyListsAreNullNotArrays(t *testing.T) {
-	testutil.KnownIssue(t, "list endpoints return {\"data\": null} when there are no rows "+
-		"(repositories build nil slices); FrontendDirections.md documents arrays")
+// Empty lists are [] (never null), at the top level and nested, as
+// FrontendDirections.md documents: the frontend calls .map on them.
+func TestEmptyListsAreArrays(t *testing.T) {
 	t.Parallel()
 	srv := testutil.NewServer(t)
+	admin := srv.AsAdmin(t)
+	prof := srv.AsProfessor(t)
+	stud := srv.AsStudent(t)
+	subj := srv.Factory.Subject(t, prof.User.ID)
+	sess := srv.Factory.LiveSession(t, subj.ID)
+	subjPath := "/api/v1/subjects/" + subj.ID.String()
 
-	res := srv.AsProfessor(t).Get(t, "/api/v1/subjects").RequireStatus(t, http.StatusOK)
-	assert.JSONEq(t, `{"data":[]}`, string(res.Body))
+	tests := []struct {
+		name   string
+		client *testutil.Client
+		path   string
+	}{
+		{"own subjects (other professor)", srv.AsProfessor(t), "/api/v1/subjects"},
+		{"schedules", prof, subjPath + "/schedules"},
+		{"roster", prof, subjPath + "/enrollments"},
+		{"session attendance", prof, "/api/v1/sessions/" + sess.ID.String() + "/attendance"},
+		{"student subjects", stud, "/api/v1/student/subjects"},
+		{"student history", stud, "/api/v1/student/attendance"},
+		{"admin attendance", admin, "/api/v1/admin/attendance"},
+		{"admin users, no match", admin, "/api/v1/admin/users?offset=1000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := tt.client.Get(t, tt.path).RequireStatus(t, http.StatusOK)
+			assert.JSONEq(t, `{"data":[]}`, string(res.Body))
+		})
+	}
+
+	t.Run("nested lists in subject detail", func(t *testing.T) {
+		var detail map[string]json.RawMessage
+		prof.Get(t, subjPath).RequireStatus(t, http.StatusOK).Data(t, &detail)
+		assert.JSONEq(t, `[]`, string(detail["schedules"]))
+		assert.JSONEq(t, `[]`, string(detail["roster"]))
+	})
 }
 
 func TestProfessor_SubjectDetailUpdateDelete(t *testing.T) {

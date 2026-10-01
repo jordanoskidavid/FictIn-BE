@@ -111,7 +111,7 @@ func (r *UserRepo) List(ctx context.Context, p ListUsersParams) ([]models.User, 
 	}
 	defer rows.Close()
 
-	var out []models.User
+	out := []models.User{} // never nil: empty lists render as [] in JSON
 	for rows.Next() {
 		u, err := scanUser(rows)
 		if err != nil {

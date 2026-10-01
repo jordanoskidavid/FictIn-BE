@@ -70,7 +70,7 @@ func (r *SessionRepo) list(ctx context.Context, q string, args ...any) ([]models
 		return nil, err
 	}
 	defer rows.Close()
-	var out []models.ClassSession
+	out := []models.ClassSession{} // never nil: empty lists render as [] in JSON
 	for rows.Next() {
 		s, err := scanSession(rows)
 		if err != nil {
