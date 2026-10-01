@@ -129,12 +129,17 @@ func (s *SubjectService) AddSchedule(ctx context.Context, subjectID, professorID
 	if in.DayOfWeek < 0 || in.DayOfWeek > 6 {
 		return nil, apperr.Validation.WithDetails("day_of_week must be 0..6")
 	}
-	if !validTime(in.StartTime) || !validTime(in.EndTime) {
+	start, okStart := parseTimeOfDay(in.StartTime)
+	end, okEnd := parseTimeOfDay(in.EndTime)
+	if !okStart || !okEnd {
 		return nil, apperr.Validation.WithDetails("start_time and end_time must be HH:MM or HH:MM:SS")
 	}
-	if in.EndTime <= in.StartTime {
+	if !end.After(start) {
 		return nil, apperr.Validation.WithDetails("end_time must be after start_time")
 	}
+	// Store normalized values so the DB CHECK (end_time > start_time) always
+	// agrees with the validation above.
+	in.StartTime, in.EndTime = start.Format(timeOfDayLayout), end.Format(timeOfDayLayout)
 	sched, err := s.store.Schedules.Create(ctx, repository.CreateScheduleParams{
 		SubjectID: subjectID,
 		DayOfWeek: in.DayOfWeek,
@@ -211,10 +216,15 @@ func (s *SubjectService) ListRoster(ctx context.Context, subjectID, professorID 
 	return out, nil
 }
 
-func validTime(s string) bool {
-	if _, err := time.Parse("15:04", s); err == nil {
-		return true
+const timeOfDayLayout = "15:04:05"
+
+// parseTimeOfDay accepts "HH:MM" or "HH:MM:SS" (a single-digit hour is fine)
+// and returns it as a comparable time on the zero date.
+func parseTimeOfDay(s string) (time.Time, bool) {
+	for _, layout := range []string{"15:04", timeOfDayLayout} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
 	}
-	_, err := time.Parse("15:04:05", s)
-	return err == nil
+	return time.Time{}, false
 }

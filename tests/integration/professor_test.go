@@ -173,18 +173,43 @@ func TestProfessor_Schedules(t *testing.T) {
 	assert.Len(t, list, 1)
 }
 
+// Times are compared as times of day, not as text, and stored normalized.
 func TestProfessor_ScheduleTimesCompareAsTimes(t *testing.T) {
-	testutil.KnownIssue(t, "schedule times are compared as strings: 9:30-10:00 is rejected "+
-		"(\"10:00\" < \"9:30\"), and 10:00-10:00:00 passes validation then violates the DB check (500)")
 	t.Parallel()
 	srv := testutil.NewServer(t)
 	prof := srv.AsProfessor(t)
 	path := "/api/v1/subjects/" + srv.Factory.Subject(t, prof.User.ID).ID.String() + "/schedules"
 
-	prof.Post(t, path, map[string]any{"day_of_week": 1, "start_time": "9:30", "end_time": "10:00"}).
-		RequireStatus(t, http.StatusCreated)
-	prof.Post(t, path, map[string]any{"day_of_week": 1, "start_time": "10:00", "end_time": "10:00:00"}).
-		RequireError(t, http.StatusUnprocessableEntity, "VALIDATION_ERROR")
+	valid := []struct {
+		start, end         string
+		wantStart, wantEnd string
+	}{
+		{"9:30", "10:00", "09:30:00", "10:00:00"},
+		{"08:05", "9:45", "08:05:00", "09:45:00"},
+		{"10:00:30", "10:00:45", "10:00:30", "10:00:45"},
+		{"00:00", "23:59:59", "00:00:00", "23:59:59"},
+	}
+	for _, tt := range valid {
+		t.Run(tt.start+"-"+tt.end, func(t *testing.T) {
+			s := prof.Post(t, path, map[string]any{"day_of_week": 1, "start_time": tt.start, "end_time": tt.end}).
+				RequireStatus(t, http.StatusCreated).DataMap(t)
+			assert.Equal(t, tt.wantStart, s["start_time"])
+			assert.Equal(t, tt.wantEnd, s["end_time"])
+		})
+	}
+
+	invalid := []struct{ name, start, end string }{
+		{"same time, different precision", "10:00", "10:00:00"},
+		{"end one second early", "10:00:01", "10:00"},
+		{"single-digit end before start", "10:00", "9:59"},
+		{"24:00 is not a time of day", "23:00", "24:00"},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			prof.Post(t, path, map[string]any{"day_of_week": 1, "start_time": tt.start, "end_time": tt.end}).
+				RequireError(t, http.StatusUnprocessableEntity, "VALIDATION_ERROR")
+		})
+	}
 }
 
 func TestProfessor_Enrollments(t *testing.T) {
