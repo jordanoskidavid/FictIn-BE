@@ -5,6 +5,7 @@ package integration
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -275,7 +276,10 @@ func TestProfessor_StartStopSession(t *testing.T) {
 	assert.Equal(t, true, view["qr_rotating"])
 
 	t.Run("only one live session per subject", func(t *testing.T) {
-		prof.Post(t, start, map[string]any{}).RequireError(t, http.StatusConflict, "CONFLICT")
+		apiErr := prof.Post(t, start, map[string]any{}).RequireError(t, http.StatusConflict, "CONFLICT")
+		var details map[string]any
+		require.NoError(t, json.Unmarshal(apiErr.Details, &details))
+		assert.Equal(t, sess["id"], details["live_session_id"], "conflict must point at the live session")
 	})
 
 	t.Run("polling fallback returns the current token", func(t *testing.T) {
@@ -304,6 +308,49 @@ func TestProfessor_StartStopSession(t *testing.T) {
 
 	// A new session can start once the previous one ended.
 	prof.Post(t, start, nil).RequireStatus(t, http.StatusCreated)
+}
+
+func TestProfessor_ListSubjectSessions(t *testing.T) {
+	t.Parallel()
+	srv := testutil.NewServer(t)
+	prof := srv.AsProfessor(t)
+	subj := srv.Factory.Subject(t, prof.User.ID)
+	path := "/api/v1/subjects/" + subj.ID.String() + "/sessions"
+
+	var list []map[string]any
+	prof.Get(t, path).RequireStatus(t, http.StatusOK).Data(t, &list)
+	assert.NotNil(t, list, "no sessions yet renders as []")
+	assert.Empty(t, list)
+
+	s1 := srv.Factory.User(t, models.RoleStudent)
+	s2 := srv.Factory.User(t, models.RoleStudent)
+	old := srv.Factory.EndedSession(t, subj.ID)
+	srv.Factory.Attendance(t, old.ID, s1.ID)
+	srv.Factory.Attendance(t, old.ID, s2.ID)
+	live := srv.Factory.LiveSession(t, subj.ID)
+
+	// Another subject's sessions must not leak in.
+	srv.Factory.EndedSession(t, srv.Factory.Subject(t, prof.User.ID).ID)
+
+	list = nil
+	prof.Get(t, path).RequireStatus(t, http.StatusOK).Data(t, &list)
+	require.Len(t, list, 2)
+	shape := sessionShape
+	shape.required = append(slices.Clone(sessionShape.required), "attendance_count")
+	for _, item := range list {
+		assertShape(t, shape, item)
+	}
+	newest, oldest := list[0], list[1]
+	assert.Equal(t, live.ID.String(), newest["id"], "newest first")
+	assert.EqualValues(t, 0, newest["attendance_count"])
+	assert.Equal(t, old.ID.String(), oldest["id"])
+	assert.Equal(t, "ended", oldest["status"])
+	assert.EqualValues(t, 2, oldest["attendance_count"])
+
+	// The past session's attendance is still readable by id.
+	var rows []map[string]any
+	prof.Get(t, "/api/v1/sessions/"+old.ID.String()+"/attendance").RequireStatus(t, http.StatusOK).Data(t, &rows)
+	assert.Len(t, rows, 2)
 }
 
 func TestProfessor_StartSessionWithSchedule(t *testing.T) {

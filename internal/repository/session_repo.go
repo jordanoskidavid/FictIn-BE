@@ -56,12 +56,37 @@ func (r *SessionRepo) Stop(ctx context.Context, id uuid.UUID) (*models.ClassSess
 	return scanSession(r.db.QueryRow(ctx, q, id))
 }
 
+// GetLiveBySubject returns the subject's live session, or ErrNotFound.
+func (r *SessionRepo) GetLiveBySubject(ctx context.Context, subjectID uuid.UUID) (*models.ClassSession, error) {
+	return scanSession(r.db.QueryRow(ctx, `SELECT `+sessionCols+` FROM class_sessions WHERE subject_id = $1 AND status = 'live'`, subjectID))
+}
+
 func (r *SessionRepo) ListLive(ctx context.Context) ([]models.ClassSession, error) {
 	return r.list(ctx, `SELECT `+sessionCols+` FROM class_sessions WHERE status = 'live' ORDER BY started_at, id`)
 }
 
-func (r *SessionRepo) ListBySubject(ctx context.Context, subjectID uuid.UUID) ([]models.ClassSession, error) {
-	return r.list(ctx, `SELECT `+sessionCols+` FROM class_sessions WHERE subject_id = $1 ORDER BY created_at DESC, id DESC`, subjectID)
+// ListBySubject returns a subject's sessions newest first, each with its
+// attendance count.
+func (r *SessionRepo) ListBySubject(ctx context.Context, subjectID uuid.UUID) ([]models.SessionSummary, error) {
+	const q = `SELECT s.id, s.subject_id, s.schedule_id, s.status, s.started_at, s.ended_at, s.created_at,
+			(SELECT count(*) FROM attendance_records a WHERE a.session_id = s.id)
+		FROM class_sessions s
+		WHERE s.subject_id = $1
+		ORDER BY s.created_at DESC, s.id DESC`
+	rows, err := r.db.Query(ctx, q, subjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.SessionSummary{} // never nil: empty lists render as [] in JSON
+	for rows.Next() {
+		var s models.SessionSummary
+		if err := rows.Scan(&s.ID, &s.SubjectID, &s.ScheduleID, &s.Status, &s.StartedAt, &s.EndedAt, &s.CreatedAt, &s.AttendanceCount); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }
 
 func (r *SessionRepo) list(ctx context.Context, q string, args ...any) ([]models.ClassSession, error) {

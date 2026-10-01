@@ -147,6 +147,21 @@ func (h *SubjectHandler) ListSchedules(w http.ResponseWriter, r *http.Request) {
 	httpresponse.OK(w, out)
 }
 
+func (h *SubjectHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
+	id := auth.MustIdentity(r.Context())
+	subjectID, err := uuidParam(r, "id")
+	if err != nil {
+		httpresponse.FromError(w, r, err)
+		return
+	}
+	out, err := h.svc.ListSessions(r.Context(), subjectID, id.UserID)
+	if err != nil {
+		httpresponse.FromError(w, r, err)
+		return
+	}
+	httpresponse.OK(w, out)
+}
+
 type enrollRequest struct {
 	StudentID   *string `json:"student_id" validate:"omitempty,uuid"`
 	StudentCode *string `json:"student_code" validate:"omitempty,max=50"`

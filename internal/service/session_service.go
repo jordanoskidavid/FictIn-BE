@@ -44,13 +44,29 @@ func (s *SessionService) Start(ctx context.Context, subjectID, professorID uuid.
 	sess, err := s.store.Sessions.StartLive(ctx, subjectID, scheduleID)
 	if err != nil {
 		if errors.Is(err, repository.ErrLiveSessionExists) {
-			return nil, apperr.Conflict.WithDetails("a live session already exists for this subject")
+			return nil, s.liveSessionConflict(ctx, subjectID)
 		}
 		return nil, apperr.Internal.WithCause(err)
 	}
 
 	s.qr.Start(sess.ID)
 	return sess, nil
+}
+
+// liveSessionConflict builds the 409 for starting a subject that is already
+// live. It includes the live session's id so the client can resume or stop it;
+// there is otherwise no endpoint to rediscover it.
+func (s *SessionService) liveSessionConflict(ctx context.Context, subjectID uuid.UUID) error {
+	const msg = "a live session already exists for this subject"
+	live, err := s.store.Sessions.GetLiveBySubject(ctx, subjectID)
+	if err != nil {
+		// Raced with a stop, or the lookup failed: still a conflict, just without the id.
+		return apperr.Conflict.WithDetails(msg)
+	}
+	return apperr.Conflict.WithDetails(map[string]any{
+		"message":         msg,
+		"live_session_id": live.ID,
+	})
 }
 
 // Stop ends a live session and cancels its QR rotation.

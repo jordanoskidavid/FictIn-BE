@@ -107,6 +107,7 @@ func New(d Deps) http.Handler {
 			r.Delete("/{id}", d.Subject.Delete)
 			r.Post("/{id}/schedules", d.Subject.AddSchedule)
 			r.Get("/{id}/schedules", d.Subject.ListSchedules)
+			r.Get("/{id}/sessions", d.Subject.ListSessions)
 			r.Post("/{id}/enrollments", d.Subject.Enroll)
 			r.Get("/{id}/enrollments", d.Subject.ListRoster)
 		})

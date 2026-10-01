@@ -140,6 +140,7 @@ pass `?access_token=<token>` (browsers can't set handshake headers).
 | DELETE | `/subjects/{id}` | |
 | POST | `/subjects/{id}/schedules` | `{day_of_week (0-6), start_time "HH:MM", end_time "HH:MM", room?}` |
 | GET | `/subjects/{id}/schedules` | |
+| GET | `/subjects/{id}/sessions` | history, newest first, with `attendance_count` |
 | POST | `/subjects/{id}/enrollments` | `{student_id}` or `{student_code}` |
 | GET | `/subjects/{id}/enrollments` | roster |
 

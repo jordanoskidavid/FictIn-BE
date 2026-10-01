@@ -92,6 +92,12 @@ type ClassSession struct {
 	CreatedAt  time.Time     `json:"created_at"`
 }
 
+// SessionSummary is a session plus how many students were marked present.
+type SessionSummary struct {
+	ClassSession
+	AttendanceCount int `json:"attendance_count"`
+}
+
 type QRToken struct {
 	ID        uuid.UUID `json:"-"`
 	SessionID uuid.UUID `json:"-"`

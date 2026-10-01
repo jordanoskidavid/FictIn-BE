@@ -48,6 +48,7 @@ func protectedRoutes() []struct {
 		{"DELETE", "/api/v1/subjects/" + id, prof},
 		{"POST", "/api/v1/subjects/" + id + "/schedules", prof},
 		{"GET", "/api/v1/subjects/" + id + "/schedules", prof},
+		{"GET", "/api/v1/subjects/" + id + "/sessions", prof},
 		{"POST", "/api/v1/subjects/" + id + "/enrollments", prof},
 		{"GET", "/api/v1/subjects/" + id + "/enrollments", prof},
 
@@ -137,6 +138,7 @@ func TestAuthz_ProfessorsCannotAccessOthersResources(t *testing.T) {
 		{"DELETE", "/api/v1/subjects/" + subj, nil},
 		{"POST", "/api/v1/subjects/" + subj + "/schedules", map[string]any{"day_of_week": 1, "start_time": "10:00", "end_time": "11:00"}},
 		{"GET", "/api/v1/subjects/" + subj + "/schedules", nil},
+		{"GET", "/api/v1/subjects/" + subj + "/sessions", nil},
 		{"POST", "/api/v1/subjects/" + subj + "/enrollments", map[string]string{"student_id": room.Student.ID.String()}},
 		{"GET", "/api/v1/subjects/" + subj + "/enrollments", nil},
 		{"POST", "/api/v1/sessions/" + subj + "/start", nil},

@@ -164,6 +164,20 @@ func (s *SubjectService) ListSchedules(ctx context.Context, subjectID, professor
 	return out, nil
 }
 
+// ---- sessions ----
+
+// ListSessions returns the subject's sessions (newest first) with attendance counts.
+func (s *SubjectService) ListSessions(ctx context.Context, subjectID, professorID uuid.UUID) ([]models.SessionSummary, error) {
+	if _, err := s.RequireOwnership(ctx, subjectID, professorID); err != nil {
+		return nil, err
+	}
+	out, err := s.store.Sessions.ListBySubject(ctx, subjectID)
+	if err != nil {
+		return nil, apperr.Internal.WithCause(err)
+	}
+	return out, nil
+}
+
 // ---- enrollments ----
 
 // Enroll adds a student (by id or student_code) to a subject.
