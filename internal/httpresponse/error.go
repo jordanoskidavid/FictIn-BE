@@ -17,7 +17,5 @@ func FromError(w http.ResponseWriter, r *http.Request, err error) {
 			"err", err, "code", e.Code, "method", r.Method, "path", r.URL.Path)
 	}
 
-	// ALREADY_MARKED is a 200 "success-ish" outcome per spec; callers that want a
-	// body should handle it explicitly, but if it reaches here treat it as data.
 	FailWithDetails(w, e.Status, e.Code, e.Message, e.Details)
 }

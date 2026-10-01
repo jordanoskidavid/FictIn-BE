@@ -74,5 +74,4 @@ var (
 	TokenInvalid   = New(http.StatusBadRequest, "TOKEN_INVALID", "the QR token is invalid for this session")
 	SessionNotLive = New(http.StatusConflict, "SESSION_NOT_LIVE", "the session is not currently live")
 	NotEnrolled    = New(http.StatusForbidden, "NOT_ENROLLED", "you are not enrolled in this subject")
-	AlreadyMarked  = New(http.StatusOK, "ALREADY_MARKED", "attendance already recorded for this session")
 )

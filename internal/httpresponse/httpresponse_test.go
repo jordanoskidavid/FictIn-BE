@@ -96,7 +96,6 @@ func TestFromErrorMapsDomainErrors(t *testing.T) {
 		{apperr.TokenInvalid, 400, "TOKEN_INVALID"},
 		{apperr.SessionNotLive, 409, "SESSION_NOT_LIVE"},
 		{apperr.NotEnrolled, 403, "NOT_ENROLLED"},
-		{apperr.AlreadyMarked, 200, "ALREADY_MARKED"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.wantCode, func(t *testing.T) {
