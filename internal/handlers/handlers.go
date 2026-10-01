@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -18,7 +19,21 @@ import (
 	"fictin/internal/httpresponse"
 )
 
-var validate = validator.New(validator.WithRequiredStructEnabled())
+var validate = newValidator()
+
+// newValidator reports field errors under their JSON names (e.g. "session_id"),
+// the same names the client sent.
+func newValidator() *validator.Validate {
+	v := validator.New(validator.WithRequiredStructEnabled())
+	v.RegisterTagNameFunc(func(f reflect.StructField) string {
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "" || name == "-" {
+			return f.Name
+		}
+		return name
+	})
+	return v
+}
 
 // decode reads and validates a JSON body into dst (a pointer to a struct).
 func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
@@ -51,7 +66,7 @@ func validationDetails(err error) error {
 	}
 	fields := make(map[string]string, len(verrs))
 	for _, fe := range verrs {
-		fields[toSnake(fe.Field())] = fe.Tag()
+		fields[fe.Field()] = fe.Tag()
 	}
 	return apperr.Validation.WithDetails(fields)
 }
@@ -88,19 +103,4 @@ func optionalUUIDQuery(r *http.Request, name string) (*uuid.UUID, error) {
 		return nil, apperr.BadRequest.WithDetails(name + " must be a valid UUID")
 	}
 	return &id, nil
-}
-
-func toSnake(s string) string {
-	var b strings.Builder
-	for i, r := range s {
-		if r >= 'A' && r <= 'Z' {
-			if i > 0 {
-				b.WriteByte('_')
-			}
-			b.WriteRune(r + ('a' - 'A'))
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
