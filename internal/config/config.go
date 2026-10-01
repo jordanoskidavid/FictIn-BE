@@ -37,6 +37,10 @@ type Config struct {
 
 	ScanRateLimitPerSec float64
 	ScanRateLimitBurst  int
+
+	// TrustProxyHeaders honors X-Forwarded-For; enable only behind exactly one
+	// reverse proxy that appends the client address.
+	TrustProxyHeaders bool
 }
 
 // IsDevelopment reports whether the app is running in the development environment.
@@ -111,6 +115,10 @@ func Parse(lookup LookupFunc) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.TrustProxyHeaders, err = getEnvBool(lookup, "TRUST_PROXY_HEADERS", false)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -155,6 +163,18 @@ func getEnvInt(lookup LookupFunc, key string, fallback int) (int, error) {
 		return 0, fmt.Errorf("invalid integer for %s: %q", key, v)
 	}
 	return n, nil
+}
+
+func getEnvBool(lookup LookupFunc, key string, fallback bool) (bool, error) {
+	v, ok := lookup(key)
+	if !ok || v == "" {
+		return fallback, nil
+	}
+	b, err := strconv.ParseBool(strings.TrimSpace(v))
+	if err != nil {
+		return false, fmt.Errorf("invalid boolean for %s: %q", key, v)
+	}
+	return b, nil
 }
 
 func getEnvFloat(lookup LookupFunc, key string, fallback float64) (float64, error) {

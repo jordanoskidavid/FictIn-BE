@@ -37,6 +37,7 @@ func TestParseDefaults(t *testing.T) {
 	assert.Equal(t, []string{"*"}, cfg.CORSAllowedOrigins)
 	assert.Equal(t, 5.0, cfg.ScanRateLimitPerSec)
 	assert.Equal(t, 5, cfg.ScanRateLimitBurst)
+	assert.False(t, cfg.TrustProxyHeaders, "forwarding headers are ignored unless enabled")
 	assert.False(t, cfg.IsDevelopment())
 }
 
@@ -46,6 +47,7 @@ func TestParseOverrides(t *testing.T) {
 	env["JWT_ACCESS_TTL_MINUTES"] = " 15 "
 	env["CORS_ALLOWED_ORIGINS"] = "https://a.example, https://b.example ,"
 	env["SCAN_RATE_LIMIT_PER_SEC"] = "2.5"
+	env["TRUST_PROXY_HEADERS"] = "true"
 
 	cfg, err := Parse(lookupFrom(env))
 	require.NoError(t, err)
@@ -53,6 +55,7 @@ func TestParseOverrides(t *testing.T) {
 	assert.Equal(t, 15*time.Minute, cfg.JWTAccessTTL)
 	assert.Equal(t, []string{"https://a.example", "https://b.example"}, cfg.CORSAllowedOrigins)
 	assert.Equal(t, 2.5, cfg.ScanRateLimitPerSec)
+	assert.True(t, cfg.TrustProxyHeaders)
 }
 
 func TestParseErrors(t *testing.T) {
@@ -66,6 +69,7 @@ func TestParseErrors(t *testing.T) {
 		{"empty value counts as missing", func(e map[string]string) { e["JWT_ACCESS_SECRET"] = "" }, "JWT_ACCESS_SECRET"},
 		{"non-numeric int", func(e map[string]string) { e["QR_TOKEN_TTL_MS"] = "fast" }, "QR_TOKEN_TTL_MS"},
 		{"non-numeric float", func(e map[string]string) { e["SCAN_RATE_LIMIT_PER_SEC"] = "x" }, "SCAN_RATE_LIMIT_PER_SEC"},
+		{"non-boolean flag", func(e map[string]string) { e["TRUST_PROXY_HEADERS"] = "maybe" }, "TRUST_PROXY_HEADERS"},
 		{"bcrypt cost too low", func(e map[string]string) { e["BCRYPT_COST"] = "3" }, "BCRYPT_COST"},
 		{"bcrypt cost too high", func(e map[string]string) { e["BCRYPT_COST"] = "32" }, "BCRYPT_COST"},
 		{"development requires seed admin", func(e map[string]string) { e["APP_ENV"] = "Development" }, "ADMIN_SEED_EMAIL"},

@@ -63,6 +63,7 @@ Copy `.env.example` to `.env` and adjust. Variables:
 | `ADMIN_SEED_EMAIL` / `ADMIN_SEED_PASSWORD` | — | required in development; seeds one admin if none exists |
 | `CORS_ALLOWED_ORIGINS` | `*` | comma-separated; `*` only for local dev |
 | `SCAN_RATE_LIMIT_PER_SEC` / `SCAN_RATE_LIMIT_BURST` | `5` / `5` | per-student limit on `/attendance/scan` |
+| `TRUST_PROXY_HEADERS` | `false` | use the rightmost `X-Forwarded-For` entry as the client IP; enable only behind exactly one reverse proxy |
 
 ## Running locally (native Postgres)
 

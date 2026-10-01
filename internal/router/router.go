@@ -22,6 +22,7 @@ type Deps struct {
 	ScanLimiter *middleware.PerUserRateLimiter
 	CORSOrigins []string
 	Timeout     time.Duration // per-request timeout for regular HTTP routes
+	TrustProxy  bool          // honor X-Forwarded-For (only behind one reverse proxy)
 	Health      *handlers.HealthHandler
 	Auth        *handlers.AuthHandler
 	Admin       *handlers.AdminHandler
@@ -35,9 +36,7 @@ func New(d Deps) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimw.RequestID)
-	// Known issue (reported): RealIP trusts client-supplied X-Forwarded-For /
-	// X-Real-IP headers. Replace it with proxy-aware handling before production.
-	r.Use(chimw.RealIP) //nolint:staticcheck // SA1019, tracked as a security follow-up
+	r.Use(middleware.ClientIP(d.TrustProxy))
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.SecurityHeaders)
 	r.Use(middleware.CORS(d.CORSOrigins))

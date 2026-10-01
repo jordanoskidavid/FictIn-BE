@@ -71,6 +71,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, opts Options) *App {
 		ScanLimiter: scanLimiter,
 		CORSOrigins: cfg.CORSAllowedOrigins,
 		Timeout:     cfg.RequestTimeout,
+		TrustProxy:  cfg.TrustProxyHeaders,
 		Health:      handlers.NewHealthHandler(pool),
 		Auth:        handlers.NewAuthHandler(authSvc),
 		Admin:       handlers.NewAdminHandler(adminSvc),
